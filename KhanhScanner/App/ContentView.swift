@@ -5,6 +5,7 @@ struct ContentView: View {
     @State private var pages: [UIImage] = []
     @State private var showingScanner = false
     @State private var shareURL: URL?
+    @State private var showingShare = false
     @State private var errorMessage: String?
     @State private var isProcessing = false
 
@@ -20,9 +21,7 @@ struct ContentView: View {
                         Text("Clean paper scans. Black text. Colored signatures and stamps stay colored.")
                             .multilineTextAlignment(.center)
                             .foregroundStyle(.secondary)
-                        Button {
-                            showingScanner = true
-                        } label: {
+                        Button { showingScanner = true } label: {
                             Label("Scan Document", systemImage: "camera.viewfinder")
                                 .font(.headline)
                                 .padding(.horizontal, 18)
@@ -48,8 +47,8 @@ struct ContentView: View {
                 errorMessage = error.localizedDescription
             }, onCancel: {})
         }
-        .sheet(item: $shareURL) { url in
-            ShareSheet(items: [url])
+        .sheet(isPresented: $showingShare) {
+            if let shareURL { ShareSheet(items: [shareURL]) }
         }
         .alert("Khanh Scanner", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("OK", role: .cancel) { errorMessage = nil }
@@ -73,14 +72,11 @@ struct ContentView: View {
     private func exportPDF() {
         do {
             shareURL = try PDFFileWriter.write(PDFExporter.makePDF(from: pages))
+            showingShare = true
         } catch {
             errorMessage = "Could not create PDF: \(error.localizedDescription)"
         }
     }
-}
-
-extension URL: @retroactive Identifiable {
-    public var id: String { absoluteString }
 }
 
 #Preview { ContentView() }
