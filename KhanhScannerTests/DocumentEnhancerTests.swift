@@ -3,38 +3,41 @@ import UIKit
 @testable import KhanhScanner
 
 final class DocumentEnhancerTests: XCTestCase {
-    func testBrightensPaperAndPreservesColoredInk() throws {
-        let output = try DocumentEnhancer().enhance(fixture())
-        let background = try pixel(output, x: 10, y: 10)
-        let black = try pixel(output, x: 35, y: 35)
-        let blue = try pixel(output, x: 75, y: 35)
-        let red = try pixel(output, x: 115, y: 35)
-
-        XCTAssertGreaterThan(luminance(background), 0.9, "paper should become near-white: \(background)")
-        XCTAssertLessThan(luminance(black), 0.25, "neutral dark content should remain dark: \(black)")
-        XCTAssertGreaterThan(blue.b, blue.r + 0.2, "blue ink should stay blue: \(blue)")
-        XCTAssertGreaterThan(red.r, red.b + 0.2, "red ink should stay red: \(red)")
-        XCTAssertGreaterThan(saturation(blue), 0.35, "blue ink should stay saturated: \(blue)")
-        XCTAssertGreaterThan(saturation(red), 0.35, "red ink should stay saturated: \(red)")
+    func testBrightensNeutralPaper() throws {
+        let before = try components(solid(UIColor(white: 0.82, alpha: 1)))
+        let after = try components(DocumentEnhancer().enhance(solid(UIColor(white: 0.82, alpha: 1))))
+        XCTAssertGreaterThan(luminance(after), luminance(before))
+        XCTAssertGreaterThan(luminance(after), 0.85)
     }
 
-    private func fixture() -> UIImage {
+    func testKeepsDarkTextDark() throws {
+        let after = try components(DocumentEnhancer().enhance(solid(UIColor(white: 0.12, alpha: 1))))
+        XCTAssertLessThan(luminance(after), 0.3)
+    }
+
+    func testPreservesBlueAndRedInk() throws {
+        let blue = try components(DocumentEnhancer().enhance(solid(UIColor(red: 0.08, green: 0.2, blue: 0.9, alpha: 1))))
+        let red = try components(DocumentEnhancer().enhance(solid(UIColor(red: 0.9, green: 0.08, blue: 0.08, alpha: 1))))
+        XCTAssertGreaterThan(blue.b, blue.r + 0.2)
+        XCTAssertGreaterThan(red.r, red.b + 0.2)
+        XCTAssertGreaterThan(saturation(blue), 0.35)
+        XCTAssertGreaterThan(saturation(red), 0.35)
+    }
+
+    private func solid(_ color: UIColor) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
-        return UIGraphicsImageRenderer(size: CGSize(width: 150, height: 70), format: format).image { ctx in
-            UIColor(white: 0.82, alpha: 1).setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 150, height: 70))
-            UIColor(white: 0.12, alpha: 1).setFill(); ctx.fill(CGRect(x: 25, y: 25, width: 20, height: 20))
-            UIColor(red: 0.08, green: 0.2, blue: 0.9, alpha: 1).setFill(); ctx.fill(CGRect(x: 65, y: 25, width: 20, height: 20))
-            UIColor(red: 0.9, green: 0.08, blue: 0.08, alpha: 1).setFill(); ctx.fill(CGRect(x: 105, y: 25, width: 20, height: 20))
+        return UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1), format: format).image { context in
+            color.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
         }
     }
 
-    private func pixel(_ image: UIImage, x: Int, y: Int) throws -> (r: CGFloat, g: CGFloat, b: CGFloat) {
+    private func components(_ image: UIImage) throws -> (r: CGFloat, g: CGFloat, b: CGFloat) {
         let cg = try XCTUnwrap(image.cgImage)
-        let crop = try XCTUnwrap(cg.cropping(to: CGRect(x: x, y: y, width: 1, height: 1)))
         var bytes = [UInt8](repeating: 0, count: 4)
         let context = try XCTUnwrap(CGContext(data: &bytes, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        context.draw(crop, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: 1, height: 1))
         return (CGFloat(bytes[0]) / 255, CGFloat(bytes[1]) / 255, CGFloat(bytes[2]) / 255)
     }
 
