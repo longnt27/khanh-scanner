@@ -1,0 +1,38 @@
+name: iOS CI
+
+on:
+  push:
+    branches: [main, feat/document-scanner]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select simulator
+        id: simulator
+        shell: bash
+        run: |
+          DEVICE=$(xcrun simctl list devices available | grep -m1 -E 'iPhone (16|15|14)' | sed -E 's/^[[:space:]]*([^\(]+).*/\1/' | xargs)
+          if [ -z "$DEVICE" ]; then
+            echo "No available iPhone simulator found"
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "name=$DEVICE" >> "$GITHUB_OUTPUT"
+      - name: Build
+        run: >-
+          xcodebuild build
+          -project KhanhScanner.xcodeproj
+          -scheme KhanhScanner
+          -destination 'platform=iOS Simulator,name=${{ steps.simulator.outputs.name }}'
+          CODE_SIGNING_ALLOWED=NO
+      - name: Test
+        run: >-
+          xcodebuild test
+          -project KhanhScanner.xcodeproj
+          -scheme KhanhScanner
+          -destination 'platform=iOS Simulator,name=${{ steps.simulator.outputs.name }}'
+          CODE_SIGNING_ALLOWED=NO
