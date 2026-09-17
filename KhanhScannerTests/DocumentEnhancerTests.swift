@@ -19,7 +19,9 @@ final class DocumentEnhancerTests: XCTestCase {
     }
 
     private func fixture() -> UIImage {
-        UIGraphicsImageRenderer(size: CGSize(width: 150, height: 70)).image { ctx in
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: CGSize(width: 150, height: 70), format: format).image { ctx in
             UIColor(white: 0.82, alpha: 1).setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 150, height: 70))
             UIColor(white: 0.12, alpha: 1).setFill(); ctx.fill(CGRect(x: 25, y: 25, width: 20, height: 20))
             UIColor(red: 0.08, green: 0.2, blue: 0.9, alpha: 1).setFill(); ctx.fill(CGRect(x: 65, y: 25, width: 20, height: 20))
