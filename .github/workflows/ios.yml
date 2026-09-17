@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ios-${{ github.event.pull_request.number || github.ref }}
+  group: ios-stable-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
