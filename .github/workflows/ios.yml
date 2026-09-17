@@ -1,9 +1,12 @@
 name: iOS CI
 
 on:
-  push:
-    branches: [main, feat/document-scanner]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-test:
@@ -22,14 +25,7 @@ jobs:
             exit 1
           fi
           echo "name=$DEVICE" >> "$GITHUB_OUTPUT"
-      - name: Build
-        run: >-
-          xcodebuild build
-          -project KhanhScanner.xcodeproj
-          -scheme KhanhScanner
-          -destination 'platform=iOS Simulator,name=${{ steps.simulator.outputs.name }}'
-          CODE_SIGNING_ALLOWED=NO
-      - name: Test
+      - name: Build and test
         run: >-
           xcodebuild test
           -project KhanhScanner.xcodeproj
