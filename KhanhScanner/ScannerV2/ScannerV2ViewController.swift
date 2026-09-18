@@ -471,12 +471,16 @@ final class ScannerV2ViewController: UIViewController {
     }
 
     private func viewPoint(for visionPoint: CGPoint, frame: ARFrame) -> CGPoint {
-        let imageNormalized = CGPoint(x: visionPoint.x, y: 1 - visionPoint.y)
-        let transform = frame.displayTransform(for: .portrait, viewportSize: sceneView.bounds.size)
-        let viewNormalized = imageNormalized.applying(transform)
-        return CGPoint(
-            x: viewNormalized.x * sceneView.bounds.width,
-            y: viewNormalized.y * sceneView.bounds.height
+        let pixelBuffer = frame.capturedImage
+        let orientedImageSize = CGSize(
+            width: CVPixelBufferGetHeight(pixelBuffer),
+            height: CVPixelBufferGetWidth(pixelBuffer)
+        )
+
+        return ScannerV2ViewportMapper.viewPoint(
+            for: visionPoint,
+            orientedImageSize: orientedImageSize,
+            viewportSize: sceneView.bounds.size
         )
     }
 
