@@ -246,6 +246,13 @@ final class ScannerV2GeometryTests: XCTestCase {
         XCTAssertEqual(tracker.sampleCount, 1)
     }
 
+    func testCapturedReadinessGivesExplicitMoveToNextPageInstruction() {
+        XCTAssertEqual(
+            ScannerV2CaptureReadiness.captured.statusText,
+            "Captured — move to next page"
+        )
+    }
+
     func testAutoCaptureDoesNotRearmAfterBriefDetectionFlicker() {
         var gate = ScannerV2AutoCaptureRearmGate(requiredMissingFrames: 8)
         gate.markCaptured()
