@@ -22,11 +22,15 @@ final class DocumentEnhancerTests: XCTestCase {
             )
         )
 
-        XCTAssertLessThan(channelSpread(warm), 0.08)
-        XCTAssertLessThan(channelSpread(cool), 0.08)
-        XCTAssertGreaterThan(luminance(warm), 0.88)
-        XCTAssertGreaterThan(luminance(cool), 0.88)
-        XCTAssertLessThan(abs(luminance(warm) - luminance(cool)), 0.06)
+        XCTAssertLessThan(channelSpread(warm), 0.08, "warm=\(warm)")
+        XCTAssertLessThan(channelSpread(cool), 0.08, "cool=\(cool)")
+        XCTAssertGreaterThan(luminance(warm), 0.88, "warm=\(warm)")
+        XCTAssertGreaterThan(luminance(cool), 0.88, "cool=\(cool)")
+        XCTAssertLessThan(
+            abs(luminance(warm) - luminance(cool)),
+            0.06,
+            "warm=\(warm), cool=\(cool)"
+        )
     }
 
     func testKeepsDarkTextDark() throws {
