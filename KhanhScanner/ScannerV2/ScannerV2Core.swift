@@ -34,6 +34,43 @@ enum ScannerV2PlaneGeometry {
         return rayOrigin + rayDirection * distance
     }
 
+    static func fittedRectangle(_ points: [SIMD2<Float>]) -> [SIMD2<Float>]? {
+        guard points.count == 4 else { return nil }
+
+        let top = points[1] - points[0]
+        let bottom = points[2] - points[3]
+        let leftUp = points[0] - points[3]
+        let rightUp = points[1] - points[2]
+
+        let horizontalSeed = top + bottom
+        let verticalSeed = leftUp + rightUp
+        guard simd_length(horizontalSeed) > 0.000_1,
+              simd_length(verticalSeed) > 0.000_1 else {
+            return nil
+        }
+
+        let horizontal = simd_normalize(horizontalSeed)
+        var vertical = verticalSeed - horizontal * simd_dot(verticalSeed, horizontal)
+        guard simd_length(vertical) > 0.000_1 else { return nil }
+        vertical = simd_normalize(vertical)
+        if simd_dot(vertical, verticalSeed) < 0 {
+            vertical = -vertical
+        }
+
+        let center = points.reduce(SIMD2<Float>(repeating: 0), +) / 4
+        let offsets = points.map { $0 - center }
+        let halfWidth = offsets.map { abs(simd_dot($0, horizontal)) }.reduce(0, +) / 4
+        let halfHeight = offsets.map { abs(simd_dot($0, vertical)) }.reduce(0, +) / 4
+        guard halfWidth > 0.000_1, halfHeight > 0.000_1 else { return nil }
+
+        return [
+            center - horizontal * halfWidth + vertical * halfHeight,
+            center + horizontal * halfWidth + vertical * halfHeight,
+            center + horizontal * halfWidth - vertical * halfHeight,
+            center - horizontal * halfWidth - vertical * halfHeight
+        ]
+    }
+
     static func rectangleScore(_ points: [SIMD2<Float>]) -> Float {
         guard points.count == 4 else { return 0 }
 
