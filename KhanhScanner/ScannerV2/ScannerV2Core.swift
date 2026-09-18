@@ -409,14 +409,17 @@ struct ScannerV2PageChangeDetector {
     ) -> Bool {
         guard let capturedQuadrilateral else { return true }
 
-        if capturedQuadrilateral.maximumCornerDistance(to: quadrilateral) >= minimumChange {
-            return true
+        // Once content was fingerprinted, geometry movement is not evidence of
+        // a new page. Moving the phone or lifting/replacing the same sheet can
+        // shift every corner substantially while the document is unchanged.
+        if let capturedFingerprint {
+            guard let fingerprint else { return false }
+            return capturedFingerprint.distance(to: fingerprint) >= minimumContentChange
         }
 
-        guard let capturedFingerprint, let fingerprint else {
-            return false
-        }
-        return capturedFingerprint.distance(to: fingerprint) >= minimumContentChange
+        // Geometry remains a conservative fallback for frames where content
+        // fingerprinting was unavailable at the original capture.
+        return capturedQuadrilateral.maximumCornerDistance(to: quadrilateral) >= minimumChange
     }
 
     mutating func reset() {
