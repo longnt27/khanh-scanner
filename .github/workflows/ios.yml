@@ -1,0 +1,23 @@
+name: iOS CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ios-stable-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test
+        run: >-
+          xcodebuild test
+          -project KhanhScanner.xcodeproj
+          -scheme KhanhScanner
+          -destination 'platform=iOS Simulator,name=iPhone 15 Pro'
+          CODE_SIGNING_ALLOWED=NO
