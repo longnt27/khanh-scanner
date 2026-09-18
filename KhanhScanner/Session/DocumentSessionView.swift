@@ -9,6 +9,7 @@ struct DocumentSessionView: View {
     @State private var pages: [UIImage] = []
     @State private var shareURL: URL?
     @State private var showingShare = false
+    @State private var showingExportConfirmation = false
     @State private var showingDeleteConfirmation = false
     @State private var errorMessage: String?
 
@@ -79,7 +80,9 @@ struct DocumentSessionView: View {
         }
         .task(id: session?.modifiedAt) { loadPages() }
         .sheet(isPresented: $showingShare) {
-            if let shareURL { ShareSheet(items: [shareURL]) }
+            if let shareURL {
+                ShareSheet(items: [shareURL], onCompletion: handleExportCompletion)
+            }
         }
         .confirmationDialog(
             "Delete this document and all of its pages?",
@@ -93,6 +96,11 @@ struct DocumentSessionView: View {
             Button("OK", role: .cancel) { errorMessage = nil }
         } message: {
             Text(errorMessage ?? "Unknown error")
+        }
+        .alert("PDF exported", isPresented: $showingExportConfirmation) {
+            Button("Done") { dismiss() }
+        } message: {
+            Text("The PDF was saved successfully. Your document remains available here.")
         }
     }
 
@@ -117,6 +125,18 @@ struct DocumentSessionView: View {
             showingShare = true
         } catch {
             errorMessage = "Could not create PDF: \(error.localizedDescription)"
+        }
+    }
+
+    private func handleExportCompletion(_ completed: Bool) {
+        showingShare = false
+        if let shareURL {
+            try? FileManager.default.removeItem(at: shareURL)
+            self.shareURL = nil
+        }
+        guard completed else { return }
+        DispatchQueue.main.async {
+            showingExportConfirmation = true
         }
     }
 
