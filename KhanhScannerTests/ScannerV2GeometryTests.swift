@@ -207,6 +207,34 @@ final class ScannerV2GeometryTests: XCTestCase {
         XCTAssertGreaterThan(ScannerV2ImageProcessor.sharpnessScore(of: page), 0.25)
     }
 
+    func testPageChangeDetectorAllowsNewContentAtSameGeometry() throws {
+        var detector = ScannerV2PageChangeDetector(
+            minimumChange: 0.05,
+            minimumContentChange: 0.12
+        )
+        let geometry = ScannerV2Quadrilateral(
+            topLeft: CGPoint(x: 0.2, y: 0.8),
+            topRight: CGPoint(x: 0.8, y: 0.8),
+            bottomRight: CGPoint(x: 0.8, y: 0.2),
+            bottomLeft: CGPoint(x: 0.2, y: 0.2)
+        )
+
+        let first = try XCTUnwrap(
+            ScannerV2ImageProcessor.pageFingerprint(of: fingerprintPage(variant: 0))
+        )
+        let same = try XCTUnwrap(
+            ScannerV2ImageProcessor.pageFingerprint(of: fingerprintPage(variant: 0))
+        )
+        let changed = try XCTUnwrap(
+            ScannerV2ImageProcessor.pageFingerprint(of: fingerprintPage(variant: 1))
+        )
+
+        detector.markCaptured(geometry, fingerprint: first)
+
+        XCTAssertFalse(detector.canCapture(geometry, fingerprint: same))
+        XCTAssertTrue(detector.canCapture(geometry, fingerprint: changed))
+    }
+
     func testSharpnessEstimatorDropsForBlurredEdges() throws {
         let sharp = testImage(checkerboard: true)
         let input = try XCTUnwrap(CIImage(image: sharp))
@@ -222,6 +250,26 @@ final class ScannerV2GeometryTests: XCTestCase {
             ScannerV2ImageProcessor.sharpnessScore(of: sharp),
             ScannerV2ImageProcessor.sharpnessScore(of: blurred) + 0.08
         )
+    }
+
+    private func fingerprintPage(variant: Int) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: CGSize(width: 128, height: 128), format: format).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 128, height: 128))
+            UIColor.black.setFill()
+
+            if variant == 0 {
+                for row in 0..<5 {
+                    context.fill(CGRect(x: 18, y: 24 + row * 17, width: 92, height: 3))
+                }
+            } else {
+                for column in 0..<4 {
+                    context.fill(CGRect(x: 24 + column * 23, y: 18, width: 3, height: 92))
+                }
+            }
+        }
     }
 
     private func testImage(checkerboard: Bool) -> UIImage {
