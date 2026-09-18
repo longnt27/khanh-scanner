@@ -30,21 +30,18 @@ final class DocumentEnhancer {
     private func applyPaperWhiteBalance(to image: CIImage, source: CGImage) -> CIImage {
         guard let reference = paperReferenceColor(from: source) else { return image }
 
-        let target = max(reference.r, reference.g, reference.b)
-        guard target > 0.25 else { return image }
+        let luma = 0.2126 * reference.r + 0.7152 * reference.g + 0.0722 * reference.b
+        guard luma > 0.25,
+              let filter = CIFilter(name: "CIWhitePointAdjust") else {
+            return image
+        }
 
-        let rGain = clamp(target / max(reference.r, 0.01), min: 0.80, max: 1.35)
-        let gGain = clamp(target / max(reference.g, 0.01), min: 0.80, max: 1.35)
-        let bGain = clamp(target / max(reference.b, 0.01), min: 0.80, max: 1.35)
-
-        guard let matrix = CIFilter(name: "CIColorMatrix") else { return image }
-        matrix.setValue(image, forKey: kCIInputImageKey)
-        matrix.setValue(CIVector(x: rGain, y: 0, z: 0, w: 0), forKey: "inputRVector")
-        matrix.setValue(CIVector(x: 0, y: gGain, z: 0, w: 0), forKey: "inputGVector")
-        matrix.setValue(CIVector(x: 0, y: 0, z: bGain, w: 0), forKey: "inputBVector")
-        matrix.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputAVector")
-        matrix.setValue(CIVector(x: 0, y: 0, z: 0, w: 0), forKey: "inputBiasVector")
-        return matrix.outputImage ?? image
+        filter.setValue(image, forKey: kCIInputImageKey)
+        filter.setValue(
+            CIColor(red: reference.r, green: reference.g, blue: reference.b),
+            forKey: "inputColor"
+        )
+        return filter.outputImage ?? image
     }
 
     private func paperReferenceColor(from image: CGImage) -> (r: CGFloat, g: CGFloat, b: CGFloat)? {
@@ -91,7 +88,4 @@ final class DocumentEnhancer {
         )
     }
 
-    private func clamp(_ value: CGFloat, min lower: CGFloat, max upper: CGFloat) -> CGFloat {
-        Swift.min(upper, Swift.max(lower, value))
-    }
 }
