@@ -309,7 +309,9 @@ enum ScannerV2ImageProcessor {
               let cgImage = context.createCGImage(output, from: output.extent) else {
             return nil
         }
-        return UIImage(cgImage: cgImage)
+
+        let corrected = UIImage(cgImage: cgImage)
+        return trimBackgroundSlivers(from: corrected) ?? corrected
     }
 
     static func cgImage(
