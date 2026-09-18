@@ -54,6 +54,7 @@ final class ScannerV2ViewController: UIViewController {
     private var stabilityTracker = ScannerV2StabilityTracker()
     private var cameraMotionTracker = ScannerV2CameraMotionTracker()
     private var pageChangeDetector = ScannerV2PageChangeDetector()
+    private var autoCaptureRearmGate = ScannerV2AutoCaptureRearmGate()
     private var lastAnalysisTimestamp: TimeInterval = 0
     private var lastCaptureTimestamp: TimeInterval = 0
     private var missingDocumentFrames = 0
@@ -272,6 +273,7 @@ final class ScannerV2ViewController: UIViewController {
         cameraStable: Bool
     ) {
         missingDocumentFrames = 0
+        autoCaptureRearmGate.observeDocument(present: true)
         latestQuadrilateral = quadrilateral
         latestFingerprint = fingerprint
 
@@ -295,6 +297,7 @@ final class ScannerV2ViewController: UIViewController {
 
         let now = CACurrentMediaTime()
         if readiness == .ready,
+           autoCaptureRearmGate.isArmed,
            !isCapturing,
            now - lastCaptureTimestamp > 1.0,
            pageChangeDetector.canCapture(quadrilateral, fingerprint: fingerprint) {
@@ -308,9 +311,7 @@ final class ScannerV2ViewController: UIViewController {
         latestReadiness = .noDocument
         stabilityTracker.reset()
         missingDocumentFrames += 1
-        if missingDocumentFrames >= 3 {
-            pageChangeDetector.reset()
-        }
+        autoCaptureRearmGate.observeDocument(present: false)
         documentLayer.path = nil
         updateStatus(.noDocument)
     }
@@ -388,6 +389,7 @@ final class ScannerV2ViewController: UIViewController {
                             liveQuadrilateral,
                             fingerprint: fingerprint
                         )
+                        self.autoCaptureRearmGate.markCaptured()
                         self.lastCaptureTimestamp = CACurrentMediaTime()
                         self.isCapturing = false
                         self.stabilityTracker.reset()
