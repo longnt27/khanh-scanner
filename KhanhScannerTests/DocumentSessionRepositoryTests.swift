@@ -49,12 +49,12 @@ final class DocumentSessionRepositoryTests: XCTestCase {
     func testDeleteSessionRemovesMetadataAndPageAssets() throws {
         let repository = DocumentSessionRepository(rootURL: rootURL)
         let session = try repository.createSession()
-        try repository.appendPages([image(color: .green)], to: session.id)
+        let sessionWithPage = try repository.appendPages([image(color: .green)], to: session.id)
 
         try repository.deleteSession(id: session.id)
 
         XCTAssertNil(try repository.session(id: session.id))
-        XCTAssertThrowsError(try repository.images(for: session))
+        XCTAssertThrowsError(try repository.images(for: sessionWithPage))
     }
 
     func testLifecycleCanBeArchivedAndResumedWithoutChangingPages() throws {
