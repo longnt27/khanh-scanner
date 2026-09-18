@@ -7,6 +7,17 @@ final class SmokeTests: XCTestCase {
         XCTAssertTrue(true)
     }
 
+    func testShareCompletionOnlySucceedsForCompletedActivityWithoutError() {
+        XCTAssertTrue(ShareCompletionPolicy.isSuccessful(completed: true, error: nil))
+        XCTAssertFalse(ShareCompletionPolicy.isSuccessful(completed: false, error: nil))
+        XCTAssertFalse(
+            ShareCompletionPolicy.isSuccessful(
+                completed: true,
+                error: NSError(domain: "Share", code: 1)
+            )
+        )
+    }
+
     func testScannerPresentationCannotBeDismissedInteractively() {
         let controller = UIViewController()
 
