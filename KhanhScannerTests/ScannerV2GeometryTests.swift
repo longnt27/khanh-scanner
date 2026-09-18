@@ -363,6 +363,29 @@ final class ScannerV2GeometryTests: XCTestCase {
     }
 
 
+    func testBorderCleanupRemovesThinBackgroundSlivers() throws {
+        let source = pageWithBackgroundSlivers()
+        let cleaned = try XCTUnwrap(
+            ScannerV2ImageProcessor.trimBackgroundSlivers(from: source)
+        )
+
+        XCTAssertLessThan(cleaned.size.width, source.size.width)
+        XCTAssertLessThan(cleaned.size.height, source.size.height)
+
+        let corner = try pixel(cleaned, x: 1, y: 1)
+        XCTAssertGreaterThan(luminance(corner), 0.80)
+    }
+
+    func testBorderCleanupDoesNotCropAlreadyCleanPage() throws {
+        let source = cleanDocumentPage()
+        let cleaned = try XCTUnwrap(
+            ScannerV2ImageProcessor.trimBackgroundSlivers(from: source)
+        )
+
+        XCTAssertEqual(cleaned.size.width, source.size.width, accuracy: 0.5)
+        XCTAssertEqual(cleaned.size.height, source.size.height, accuracy: 0.5)
+    }
+
     func testDocumentSignalsIgnoreSharpBackgroundOutsidePage() throws {
         let first = documentScene(backgroundPattern: 0)
         let second = documentScene(backgroundPattern: 1)
@@ -410,6 +433,84 @@ final class ScannerV2GeometryTests: XCTestCase {
         }
     }
 
+
+    private func cleanDocumentPage() -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(
+            size: CGSize(width: 160, height: 220),
+            format: format
+        ).image { context in
+            UIColor(red: 0.93, green: 0.92, blue: 0.89, alpha: 1).setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 160, height: 220))
+            UIColor.black.setFill()
+            for row in 0..<6 {
+                context.fill(CGRect(x: 24, y: 36 + row * 22, width: 112, height: 3))
+            }
+        }
+    }
+
+    private func pageWithBackgroundSlivers() -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(
+            size: CGSize(width: 160, height: 220),
+            format: format
+        ).image { context in
+            UIColor(white: 0.18, alpha: 1).setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 160, height: 220))
+
+            UIColor(red: 0.93, green: 0.92, blue: 0.89, alpha: 1).setFill()
+            context.fill(CGRect(x: 8, y: 0, width: 152, height: 213))
+
+            UIColor.black.setFill()
+            for row in 0..<6 {
+                context.fill(CGRect(x: 28, y: 36 + row * 22, width: 108, height: 3))
+            }
+        }
+    }
+
+    private func pixel(
+        _ image: UIImage,
+        x: Int,
+        y: Int
+    ) throws -> (r: CGFloat, g: CGFloat, b: CGFloat) {
+        let cg = try XCTUnwrap(image.cgImage)
+        var bytes = [UInt8](repeating: 0, count: 4)
+        let context = try XCTUnwrap(
+            CGContext(
+                data: &bytes,
+                width: 1,
+                height: 1,
+                bitsPerComponent: 8,
+                bytesPerRow: 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                    | CGBitmapInfo.byteOrder32Big.rawValue
+            )
+        )
+        context.interpolationQuality = .none
+        context.draw(
+            cg,
+            in: CGRect(
+                x: -x,
+                y: y - Int(image.size.height) + 1,
+                width: Int(image.size.width),
+                height: Int(image.size.height)
+            )
+        )
+        return (
+            CGFloat(bytes[0]) / 255,
+            CGFloat(bytes[1]) / 255,
+            CGFloat(bytes[2]) / 255
+        )
+    }
+
+    private func luminance(
+        _ c: (r: CGFloat, g: CGFloat, b: CGFloat)
+    ) -> CGFloat {
+        0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+    }
 
     private func documentScene(backgroundPattern: Int) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
