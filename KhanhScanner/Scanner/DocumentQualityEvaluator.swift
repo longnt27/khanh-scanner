@@ -53,6 +53,7 @@ private enum DocumentCornerFoldAnalyzer {
     private static let minimumSeparation = 42.0
     private static let minimumSupportedFraction = 0.72
     private static let maximumOuterDeviation = 34.0
+    private static let maximumInnerDeviation = 28.0
 
     static func hasObviousFold(in image: CGImage) -> Bool {
         guard let grayscaleImage = grayscaleImage(from: image) else { return false }
@@ -75,6 +76,7 @@ private enum DocumentCornerFoldAnalyzer {
     ) -> Bool {
         var signedDifferences: [Double] = []
         var innerBoundaryValues: [Double] = []
+        var innerReferenceValues: [Double] = []
 
         for index in 0..<sampleCount {
             let progress = 0.25 + 0.5 * (Double(index) + 0.5) / Double(sampleCount)
@@ -94,6 +96,12 @@ private enum DocumentCornerFoldAnalyzer {
             )
             signedDifferences.append(Double(inner) - Double(outer))
             innerBoundaryValues.append(Double(inner))
+            innerReferenceValues.append(Double(sample(
+                at: corner,
+                u: u + Double(comparisonOffset * 2),
+                v: v + Double(comparisonOffset * 2),
+                image: image
+            )))
         }
 
         let meanDifference = signedDifferences.reduce(0, +) / Double(signedDifferences.count)
@@ -115,10 +123,12 @@ private enum DocumentCornerFoldAnalyzer {
         guard !outerValues.isEmpty else { return false }
         let mean = outerValues.reduce(0, +) / Double(outerValues.count)
         let innerMean = innerBoundaryValues.reduce(0, +) / Double(innerBoundaryValues.count)
+        let innerReferenceMean = innerReferenceValues.reduce(0, +) / Double(innerReferenceValues.count)
         let variance = outerValues.reduce(0) { total, value in
             total + pow(value - mean, 2)
         } / Double(outerValues.count)
         return abs(innerMean - mean) >= minimumSeparation
+            && abs(innerMean - innerReferenceMean) <= maximumInnerDeviation
             && sqrt(variance) <= maximumOuterDeviation
     }
 
