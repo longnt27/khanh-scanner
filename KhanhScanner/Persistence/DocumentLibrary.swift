@@ -35,6 +35,11 @@ final class DocumentLibrary: ObservableObject {
         return try repository.images(for: session)
     }
 
+    func renameSession(id: UUID, to name: String) throws {
+        try repository.renameSession(id: id, to: name)
+        try reloadThrowing()
+    }
+
     func deleteSession(id: UUID) throws {
         try repository.deleteSession(id: id)
         try reloadThrowing()
