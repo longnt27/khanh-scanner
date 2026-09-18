@@ -19,6 +19,40 @@ struct ScannerV2Quadrilateral: Equatable {
     }
 }
 
+
+enum ScannerV2ViewportMapper {
+    static func viewPoint(
+        for visionPoint: CGPoint,
+        orientedImageSize: CGSize,
+        viewportSize: CGSize
+    ) -> CGPoint {
+        guard orientedImageSize.width > 0,
+              orientedImageSize.height > 0,
+              viewportSize.width > 0,
+              viewportSize.height > 0 else {
+            return .zero
+        }
+
+        let scale = max(
+            viewportSize.width / orientedImageSize.width,
+            viewportSize.height / orientedImageSize.height
+        )
+        let renderedSize = CGSize(
+            width: orientedImageSize.width * scale,
+            height: orientedImageSize.height * scale
+        )
+        let origin = CGPoint(
+            x: (viewportSize.width - renderedSize.width) / 2,
+            y: (viewportSize.height - renderedSize.height) / 2
+        )
+
+        return CGPoint(
+            x: origin.x + visionPoint.x * renderedSize.width,
+            y: origin.y + (1 - visionPoint.y) * renderedSize.height
+        )
+    }
+}
+
 enum ScannerV2PlaneGeometry {
     static func intersection(
         rayOrigin: SIMD3<Float>,
