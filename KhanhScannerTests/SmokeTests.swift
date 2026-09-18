@@ -25,4 +25,25 @@ final class SmokeTests: XCTestCase {
 
         XCTAssertTrue(controller.isModalInPresentation)
     }
+    func testLongPressSelectionEntersSelectionModeAndSelectsItem() {
+        let item = LibraryItemID.session(UUID())
+        var state = LibrarySelectionState()
+
+        state.beginSelecting(item)
+
+        XCTAssertTrue(state.isEditing)
+        XCTAssertEqual(state.selection, [item])
+    }
+
+    func testFinishingSelectionClearsSelectedItems() {
+        let item = LibraryItemID.folder(UUID())
+        var state = LibrarySelectionState()
+        state.beginSelecting(item)
+
+        state.finish()
+
+        XCTAssertFalse(state.isEditing)
+        XCTAssertTrue(state.selection.isEmpty)
+    }
+
 }
