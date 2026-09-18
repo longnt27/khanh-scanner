@@ -27,7 +27,7 @@ final class DocumentEnhancer {
                     // surfaces in a scan. Use soft transitions so pale stamps
                     // and highlights do not hit a hard threshold.
                     let bright = smoothstep(0.52, 0.82, luminance)
-                    let lowSaturation = 1 - smoothstep(0.18, 0.55, saturation)
+                    let lowSaturation = 1 - smoothstep(0.42, 0.78, saturation)
                     let paperWeight = bright * lowSaturation
 
                     let neutral = min(1, luminance + (1 - luminance) * 0.65)
