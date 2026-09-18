@@ -35,6 +35,7 @@ struct LibraryBrowserView: View {
     @State private var newFolderName = ""
     @State private var showingNewFolder = false
     @State private var showingMovePicker = false
+    @State private var showingDeleteConfirmation = false
     @State private var errorMessage: String?
 
     private var childFolders: [DocumentFolder] {
@@ -150,6 +151,12 @@ struct LibraryBrowserView: View {
                     Button { showingMovePicker = true } label: {
                         Label("Move", systemImage: "folder")
                     }
+                    Spacer()
+                    Button(role: .destructive) {
+                        showingDeleteConfirmation = true
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
                 }
                 .padding()
                 .background(.bar)
@@ -180,6 +187,16 @@ struct LibraryBrowserView: View {
                 moveSelection(to: destinationID)
             }
         }
+        .confirmationDialog(
+            bulkDeleteTitle,
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(bulkDeleteButtonTitle, role: .destructive, action: deleteSelection)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(bulkDeleteMessage)
+        }
         .alert("Khanh Scanner", isPresented: errorBinding) {
             Button("OK", role: .cancel) { errorMessage = nil }
         } message: {
@@ -199,6 +216,21 @@ struct LibraryBrowserView: View {
             if case let .folder(id) = item { return id }
             return nil
         }
+    }
+
+    private var bulkDeleteTitle: String {
+        "Delete \(selectionState.selection.count) selected item\(selectionState.selection.count == 1 ? "" : "s")?"
+    }
+
+    private var bulkDeleteButtonTitle: String {
+        selectionState.selection.count == 1 ? "Delete Item" : "Delete Items"
+    }
+
+    private var bulkDeleteMessage: String {
+        if selectedFolderIDs.isEmpty {
+            return "The selected documents and their scanned pages will be permanently deleted."
+        }
+        return "Selected folders, their subfolders, and all documents inside them will be permanently deleted."
     }
 
     private var editModeBinding: Binding<EditMode> {
@@ -251,6 +283,18 @@ struct LibraryBrowserView: View {
     private func deleteFolder(_ id: UUID) {
         do {
             try library.deleteFolder(id: id)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func deleteSelection() {
+        do {
+            try library.deleteItems(
+                sessionIDs: selectedSessionIDs,
+                folderIDs: selectedFolderIDs
+            )
+            finishSelection()
         } catch {
             errorMessage = error.localizedDescription
         }
