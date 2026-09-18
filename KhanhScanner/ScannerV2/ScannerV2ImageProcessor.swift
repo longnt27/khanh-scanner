@@ -2,6 +2,18 @@ import CoreImage
 import ImageIO
 import UIKit
 
+struct ScannerV2PageFingerprint: Equatable {
+    let bits: [UInt8]
+
+    func distance(to other: ScannerV2PageFingerprint) -> Float {
+        guard bits.count == other.bits.count, !bits.isEmpty else { return 1 }
+        let changed = zip(bits, other.bits).reduce(0) { count, pair in
+            count + (pair.0 == pair.1 ? 0 : 1)
+        }
+        return Float(changed) / Float(bits.count)
+    }
+}
+
 enum ScannerV2ImageProcessor {
     private static let context = CIContext(options: [.cacheIntermediates: false])
     private static let sampleSize = 64
@@ -59,6 +71,35 @@ enum ScannerV2ImageProcessor {
             / Float(strongEdges.count)
             / 255
         return min(1, meanStrongGradient)
+    }
+
+    static func pageFingerprint(of image: UIImage) -> ScannerV2PageFingerprint? {
+        guard let cgImage = normalizedCGImage(from: image) else { return nil }
+
+        let size = 16
+        var pixels = [UInt8](repeating: 0, count: size * size)
+        let rendered = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(
+                data: buffer.baseAddress,
+                width: size,
+                height: size,
+                bitsPerComponent: 8,
+                bytesPerRow: size,
+                space: CGColorSpaceCreateDeviceGray(),
+                bitmapInfo: CGImageAlphaInfo.none.rawValue
+            ) else {
+                return false
+            }
+
+            context.interpolationQuality = .medium
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: size, height: size))
+            return true
+        }
+        guard rendered else { return nil }
+
+        let mean = pixels.reduce(0) { $0 + Int($1) } / pixels.count
+        let bits = pixels.map { $0 < UInt8(mean) ? UInt8(1) : UInt8(0) }
+        return ScannerV2PageFingerprint(bits: bits)
     }
 
     static func correctedImage(
