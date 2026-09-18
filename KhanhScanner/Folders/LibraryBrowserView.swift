@@ -10,14 +10,28 @@ enum LibraryItemID: Hashable {
     case session(UUID)
 }
 
+struct LibrarySelectionState {
+    var selection: Set<LibraryItemID> = []
+    var isEditing = false
+
+    mutating func beginSelecting(_ item: LibraryItemID) {
+        isEditing = true
+        selection.insert(item)
+    }
+
+    mutating func finish() {
+        selection.removeAll()
+        isEditing = false
+    }
+}
+
 struct LibraryBrowserView: View {
     @ObservedObject var library: DocumentLibrary
     let currentFolderID: UUID?
     let canScan: Bool
     let onNewDocument: (UUID?) -> Void
 
-    @State private var selection: Set<LibraryItemID> = []
-    @State private var editMode: EditMode = .inactive
+    @State private var selectionState = LibrarySelectionState()
     @State private var newFolderName = ""
     @State private var showingNewFolder = false
     @State private var showingMovePicker = false
@@ -37,7 +51,7 @@ struct LibraryBrowserView: View {
     }
 
     var body: some View {
-        List(selection: $selection) {
+        List(selection: $selectionState.selection) {
             if childFolders.isEmpty && childSessions.isEmpty {
                 ContentUnavailableView(
                     currentFolderID == nil ? "No Documents" : "Empty Folder",
@@ -54,6 +68,12 @@ struct LibraryBrowserView: View {
                             Label(folder.name, systemImage: "folder.fill")
                         }
                         .tag(LibraryItemID.folder(folder.id))
+                        .simultaneousGesture(
+                            LongPressGesture(minimumDuration: 0.35)
+                                .onEnded { _ in
+                                    selectionState.beginSelecting(.folder(folder.id))
+                                }
+                        )
                         .swipeActions {
                             Button(role: .destructive) { deleteFolder(folder.id) } label: {
                                 Label("Delete", systemImage: "trash")
@@ -76,21 +96,26 @@ struct LibraryBrowserView: View {
                             }
                         }
                         .tag(LibraryItemID.session(session.id))
+                        .simultaneousGesture(
+                            LongPressGesture(minimumDuration: 0.35)
+                                .onEnded { _ in
+                                    selectionState.beginSelecting(.session(session.id))
+                                }
+                        )
                     }
                 }
             }
         }
-        .environment(\.editMode, $editMode)
+        .environment(\.editMode, editModeBinding)
         .navigationTitle(title)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if !childFolders.isEmpty || !childSessions.isEmpty {
-                    Button(editMode.isEditing ? "Done" : "Select") {
-                        if editMode.isEditing {
-                            editMode = .inactive
-                            selection.removeAll()
+                    Button(selectionState.isEditing ? "Done" : "Select") {
+                        if selectionState.isEditing {
+                            selectionState.finish()
                         } else {
-                            editMode = .active
+                            selectionState.isEditing = true
                         }
                     }
                 }
@@ -113,7 +138,7 @@ struct LibraryBrowserView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            if editMode.isEditing && !selection.isEmpty {
+            if selectionState.isEditing && !selectionState.selection.isEmpty {
                 HStack {
                     Button {
                         newFolderName = ""
@@ -145,7 +170,7 @@ struct LibraryBrowserView: View {
             Button("Create", action: createFolder)
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(selection.isEmpty ? "Create it here." : "Move the selected items into it.")
+            Text(selectionState.selection.isEmpty ? "Create it here." : "Move the selected items into it.")
         }
         .sheet(isPresented: $showingMovePicker) {
             FolderDestinationPicker(
@@ -163,17 +188,30 @@ struct LibraryBrowserView: View {
     }
 
     private var selectedSessionIDs: [UUID] {
-        selection.compactMap { item in
+        selectionState.selection.compactMap { item in
             if case let .session(id) = item { return id }
             return nil
         }
     }
 
     private var selectedFolderIDs: [UUID] {
-        selection.compactMap { item in
+        selectionState.selection.compactMap { item in
             if case let .folder(id) = item { return id }
             return nil
         }
+    }
+
+    private var editModeBinding: Binding<EditMode> {
+        Binding(
+            get: { selectionState.isEditing ? .active : .inactive },
+            set: { newValue in
+                if newValue.isEditing {
+                    selectionState.isEditing = true
+                } else {
+                    selectionState.finish()
+                }
+            }
+        )
     }
 
     private var errorBinding: Binding<Bool> {
@@ -219,8 +257,7 @@ struct LibraryBrowserView: View {
     }
 
     private func finishSelection() {
-        selection.removeAll()
-        editMode = .inactive
+        selectionState.finish()
     }
 }
 
