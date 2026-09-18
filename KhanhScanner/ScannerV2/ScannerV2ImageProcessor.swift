@@ -31,25 +31,34 @@ enum ScannerV2ImageProcessor {
         }
         guard rendered else { return 0 }
 
-        var total: Int = 0
-        var comparisons = 0
+        var gradients: [UInt8] = []
+        gradients.reserveCapacity(sampleSize * sampleSize * 2)
+
         for y in 0..<sampleSize {
             for x in 0..<sampleSize {
                 let index = y * sampleSize + x
                 if x + 1 < sampleSize {
-                    total += abs(Int(pixels[index]) - Int(pixels[index + 1]))
-                    comparisons += 1
+                    gradients.append(UInt8(abs(Int(pixels[index]) - Int(pixels[index + 1]))))
                 }
                 if y + 1 < sampleSize {
-                    total += abs(Int(pixels[index]) - Int(pixels[index + sampleSize]))
-                    comparisons += 1
+                    gradients.append(UInt8(abs(Int(pixels[index]) - Int(pixels[index + sampleSize]))))
                 }
             }
         }
 
-        guard comparisons > 0 else { return 0 }
-        let meanGradient = Float(total) / Float(comparisons) / 255
-        return min(1, meanGradient * 3)
+        guard !gradients.isEmpty else { return 0 }
+
+        // Document pages are mostly blank paper, so averaging every pixel edge
+        // punishes perfectly sharp pages that contain only a few lines of text.
+        // Measure the strongest high-frequency detail instead. Blur lowers these
+        // peaks while blank areas no longer drown the signal.
+        gradients.sort(by: >)
+        let tailCount = max(64, gradients.count / 20)
+        let strongEdges = gradients.prefix(tailCount)
+        let meanStrongGradient = Float(strongEdges.reduce(0) { $0 + Int($1) })
+            / Float(strongEdges.count)
+            / 255
+        return min(1, meanStrongGradient)
     }
 
     static func correctedImage(
