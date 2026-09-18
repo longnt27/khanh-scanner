@@ -206,17 +206,21 @@ struct ScannerV2CameraMotionTracker {
         )
         let translationDelta = simd_distance(previousPosition, position)
 
-        let previousForward = simd_normalize(SIMD3<Float>(
-            -previousTransform.columns.2.x,
-            -previousTransform.columns.2.y,
-            -previousTransform.columns.2.z
-        ))
-        let forward = simd_normalize(SIMD3<Float>(
-            -transform.columns.2.x,
-            -transform.columns.2.y,
-            -transform.columns.2.z
-        ))
-        let cosine = max(-1, min(1, simd_dot(previousForward, forward)))
+        let previousRotation = simd_float3x3(
+            SIMD3<Float>(previousTransform.columns.0.x, previousTransform.columns.0.y, previousTransform.columns.0.z),
+            SIMD3<Float>(previousTransform.columns.1.x, previousTransform.columns.1.y, previousTransform.columns.1.z),
+            SIMD3<Float>(previousTransform.columns.2.x, previousTransform.columns.2.y, previousTransform.columns.2.z)
+        )
+        let rotation = simd_float3x3(
+            SIMD3<Float>(transform.columns.0.x, transform.columns.0.y, transform.columns.0.z),
+            SIMD3<Float>(transform.columns.1.x, transform.columns.1.y, transform.columns.1.z),
+            SIMD3<Float>(transform.columns.2.x, transform.columns.2.y, transform.columns.2.z)
+        )
+        let relativeRotation = simd_transpose(previousRotation) * rotation
+        let trace = relativeRotation.columns.0.x
+            + relativeRotation.columns.1.y
+            + relativeRotation.columns.2.z
+        let cosine = max(-1, min(1, (trace - 1) / 2))
         let rotationDelta = acos(cosine)
 
         self.previousTransform = transform
