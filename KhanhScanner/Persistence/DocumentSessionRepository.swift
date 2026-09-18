@@ -210,6 +210,56 @@ final class DocumentSessionRepository {
         }
     }
 
+    func deleteItems(
+        sessionIDs: [UUID] = [],
+        folderIDs: [UUID] = []
+    ) throws {
+        var catalog = try loadCatalog()
+        let requestedSessionIDs = Set(sessionIDs)
+        let requestedFolderIDs = Set(folderIDs)
+
+        for sessionID in requestedSessionIDs where !catalog.sessions.contains(where: { $0.id == sessionID }) {
+            throw DocumentSessionRepositoryError.sessionNotFound
+        }
+        for folderID in requestedFolderIDs where !catalog.folders.contains(where: { $0.id == folderID }) {
+            throw DocumentSessionRepositoryError.folderNotFound
+        }
+
+        var foldersToDelete = requestedFolderIDs
+        var addedDescendant = true
+        while addedDescendant {
+            addedDescendant = false
+            for folder in catalog.folders {
+                guard let parentID = folder.parentFolderID,
+                      foldersToDelete.contains(parentID),
+                      !foldersToDelete.contains(folder.id) else {
+                    continue
+                }
+                foldersToDelete.insert(folder.id)
+                addedDescendant = true
+            }
+        }
+
+        var sessionsToDelete = requestedSessionIDs
+        for session in catalog.sessions {
+            if let folderID = session.folderID, foldersToDelete.contains(folderID) {
+                sessionsToDelete.insert(session.id)
+            }
+        }
+
+        let removedSessions = catalog.sessions.filter { sessionsToDelete.contains($0.id) }
+        catalog.sessions.removeAll { sessionsToDelete.contains($0.id) }
+        catalog.folders.removeAll { foldersToDelete.contains($0.id) }
+        try saveCatalog(catalog)
+
+        for session in removedSessions {
+            let directory = pageDirectory(for: session.id)
+            if fileManager.fileExists(atPath: directory.path) {
+                try fileManager.removeItem(at: directory)
+            }
+        }
+    }
+
     private var catalogURL: URL {
         rootURL.appendingPathComponent("sessions.json")
     }
