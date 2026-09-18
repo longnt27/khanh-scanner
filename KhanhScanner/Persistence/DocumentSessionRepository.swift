@@ -5,6 +5,7 @@ enum DocumentSessionRepositoryError: LocalizedError {
     case sessionNotFound
     case folderNotFound
     case invalidFolderName
+    case invalidDocumentName
     case cyclicFolderRelationship
     case folderNotEmpty
     case imageEncodingFailed
@@ -15,6 +16,7 @@ enum DocumentSessionRepositoryError: LocalizedError {
         case .sessionNotFound: "The document session no longer exists."
         case .folderNotFound: "The folder no longer exists."
         case .invalidFolderName: "Enter a folder name."
+        case .invalidDocumentName: "Enter a document name."
         case .cyclicFolderRelationship: "A folder cannot be moved into itself or one of its subfolders."
         case .folderNotEmpty: "Move this folder's contents before deleting it."
         case .imageEncodingFailed: "A scanned page could not be saved."
@@ -134,6 +136,28 @@ final class DocumentSessionRepository {
             }
             return image
         }
+    }
+
+    @discardableResult
+    func renameSession(
+        id sessionID: UUID,
+        to name: String,
+        modifiedAt: Date = Date()
+    ) throws -> DocumentSession {
+        var catalog = try loadCatalog()
+        guard let index = catalog.sessions.firstIndex(where: { $0.id == sessionID }) else {
+            throw DocumentSessionRepositoryError.sessionNotFound
+        }
+
+        let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else {
+            throw DocumentSessionRepositoryError.invalidDocumentName
+        }
+
+        catalog.sessions[index].name = normalized
+        catalog.sessions[index].modifiedAt = modifiedAt
+        try saveCatalog(catalog)
+        return catalog.sessions[index]
     }
 
     @discardableResult
