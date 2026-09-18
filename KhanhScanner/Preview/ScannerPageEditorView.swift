@@ -3,8 +3,25 @@ import UIKit
 
 struct ScannerPageDraft: Identifiable {
     let id: UUID
-    var image: UIImage
+    var sourceImage: UIImage
+    var cropQuadrilateral: ScannerV2Quadrilateral
+    var rotation: DocumentPageRotation
+    var renderedImage: UIImage
     var needsEnhancement: Bool
+    var isLegacySource: Bool
+    var isPersisted: Bool
+    var isDirty: Bool
+
+    var image: UIImage { renderedImage }
+
+    var documentPage: DocumentPage {
+        DocumentPage(
+            id: id,
+            cropQuadrilateral: cropQuadrilateral,
+            rotation: rotation,
+            isLegacySource: isLegacySource
+        )
+    }
 
     init(
         id: UUID = UUID(),
@@ -12,8 +29,52 @@ struct ScannerPageDraft: Identifiable {
         needsEnhancement: Bool
     ) {
         self.id = id
-        self.image = image
+        sourceImage = image
+        cropQuadrilateral = .fullBounds
+        rotation = .none
+        renderedImage = image
         self.needsEnhancement = needsEnhancement
+        isLegacySource = true
+        isPersisted = false
+        isDirty = true
+    }
+
+    init(
+        id: UUID = UUID(),
+        sourceImage: UIImage,
+        cropQuadrilateral: ScannerV2Quadrilateral,
+        rotation: DocumentPageRotation = .none,
+        renderedImage: UIImage,
+        needsEnhancement: Bool,
+        isLegacySource: Bool,
+        isPersisted: Bool = false,
+        isDirty: Bool = true
+    ) {
+        self.id = id
+        self.sourceImage = sourceImage
+        self.cropQuadrilateral = cropQuadrilateral
+        self.rotation = rotation
+        self.renderedImage = renderedImage
+        self.needsEnhancement = needsEnhancement
+        self.isLegacySource = isLegacySource
+        self.isPersisted = isPersisted
+        self.isDirty = isDirty
+    }
+
+    init(assets: DocumentPageAssets) {
+        id = assets.page.id
+        sourceImage = assets.sourceImage
+        cropQuadrilateral = assets.page.cropQuadrilateral
+        rotation = assets.page.rotation
+        renderedImage = assets.renderedImage
+        needsEnhancement = false
+        isLegacySource = assets.page.isLegacySource
+        isPersisted = true
+        isDirty = false
+    }
+
+    var shouldEnhanceWhileEditing: Bool {
+        !isLegacySource && !needsEnhancement
     }
 }
 
@@ -21,11 +82,21 @@ struct ScannerPageEditorState {
     var pages: [ScannerPageDraft]
 
     mutating func rotatePage(id: UUID, clockwise: Bool) {
-        guard let index = pages.firstIndex(where: { $0.id == id }),
-              let rotated = Self.rotated(pages[index].image, clockwise: clockwise) else {
+        guard let index = pages.firstIndex(where: { $0.id == id }) else { return }
+
+        var updated = pages[index]
+        updated.rotation = updated.rotation.rotated(clockwise: clockwise)
+        guard let rendered = try? DocumentPageRenderer.render(
+            source: updated.sourceImage,
+            page: updated.documentPage,
+            enhance: updated.shouldEnhanceWhileEditing
+        ) else {
             return
         }
-        pages[index].image = rotated
+
+        updated.renderedImage = rendered
+        updated.isDirty = true
+        pages[index] = updated
     }
 
     mutating func deletePage(id: UUID) {
@@ -33,41 +104,40 @@ struct ScannerPageEditorState {
     }
 
     mutating func movePage(id: UUID, offset: Int) {
-        guard let source = pages.firstIndex(where: { $0.id == id }) else { return }
+        guard let source = pages.firstIndex(where: { $0.id == id }),
+              !pages.isEmpty else {
+            return
+        }
         let destination = min(max(0, source + offset), pages.count - 1)
         guard destination != source else { return }
         let page = pages.remove(at: source)
         pages.insert(page, at: destination)
     }
 
-    mutating func cropPage(id: UUID, quadrilateral: ScannerV2Quadrilateral) {
-        guard let index = pages.firstIndex(where: { $0.id == id }),
-              let cropped = ScannerV2ImageProcessor.manualPerspectiveCrop(
-                from: pages[index].image,
-                quadrilateral: quadrilateral
-              ) else {
-            return
+    @discardableResult
+    mutating func cropPage(
+        id: UUID,
+        quadrilateral: ScannerV2Quadrilateral
+    ) -> Bool {
+        guard quadrilateral.isValidCrop,
+              let index = pages.firstIndex(where: { $0.id == id }) else {
+            return false
         }
-        pages[index].image = cropped
-    }
 
-    private static func rotated(_ image: UIImage, clockwise: Bool) -> UIImage? {
-        let size = CGSize(width: image.size.height, height: image.size.width)
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = image.scale
-        format.opaque = false
-
-        return UIGraphicsImageRenderer(size: size, format: format).image { context in
-            let cg = context.cgContext
-            if clockwise {
-                cg.translateBy(x: size.width, y: 0)
-                cg.rotate(by: .pi / 2)
-            } else {
-                cg.translateBy(x: 0, y: size.height)
-                cg.rotate(by: -.pi / 2)
-            }
-            image.draw(in: CGRect(origin: .zero, size: image.size))
+        var updated = pages[index]
+        updated.cropQuadrilateral = quadrilateral
+        guard let rendered = try? DocumentPageRenderer.render(
+            source: updated.sourceImage,
+            page: updated.documentPage,
+            enhance: updated.shouldEnhanceWhileEditing
+        ) else {
+            return false
         }
+
+        updated.renderedImage = rendered
+        updated.isDirty = true
+        pages[index] = updated
+        return true
     }
 }
 
@@ -75,19 +145,24 @@ struct ScannerPageEditorView: View {
     @State private var state: ScannerPageEditorState
     @State private var selectedPageID: UUID?
     @State private var croppingPageID: UUID?
+    @State private var errorMessage: String?
 
     let onCancel: () -> Void
-    let onSave: ([ScannerPageDraft]) -> Void
+    let onDone: ([ScannerPageDraft]) -> Void
 
     init(
         pages: [ScannerPageDraft],
+        initialPageID: UUID? = nil,
         onCancel: @escaping () -> Void,
-        onSave: @escaping ([ScannerPageDraft]) -> Void
+        onDone: @escaping ([ScannerPageDraft]) -> Void
     ) {
         _state = State(initialValue: ScannerPageEditorState(pages: pages))
-        _selectedPageID = State(initialValue: pages.first?.id)
+        let selected = initialPageID.flatMap { requested in
+            pages.contains(where: { $0.id == requested }) ? requested : nil
+        } ?? pages.first?.id
+        _selectedPageID = State(initialValue: selected)
         self.onCancel = onCancel
-        self.onSave = onSave
+        self.onDone = onDone
     }
 
     private var selectedPage: ScannerPageDraft? {
@@ -99,7 +174,7 @@ struct ScannerPageEditorView: View {
         NavigationStack {
             VStack(spacing: 12) {
                 if let selectedPage {
-                    Image(uiImage: selectedPage.image)
+                    Image(uiImage: selectedPage.renderedImage)
                         .resizable()
                         .scaledToFit()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -111,29 +186,43 @@ struct ScannerPageEditorView: View {
                     ContentUnavailableView(
                         "No Pages",
                         systemImage: "doc",
-                        description: Text("Return to the camera to scan a page.")
+                        description: Text("There are no pages in this document.")
                     )
                 }
             }
             .padding(.horizontal)
-            .navigationTitle("Pages")
+            .navigationTitle("Edit Page")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Camera") {
-                        onCancel()
-                    }
+                    Button("Back", action: onCancel)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
-                        onSave(state.pages)
+                        onDone(state.pages)
                     }
                 }
             }
             .sheet(item: croppingBinding) { page in
-                ManualPageCropView(image: page.image) { quadrilateral in
-                    state.cropPage(id: page.id, quadrilateral: quadrilateral)
+                ManualPageCropView(
+                    image: page.sourceImage,
+                    quadrilateral: page.cropQuadrilateral
+                ) { quadrilateral in
+                    if !state.cropPage(id: page.id, quadrilateral: quadrilateral) {
+                        errorMessage = "That crop shape cannot be rendered."
+                    }
                 }
+            }
+            .alert(
+                "Could Not Edit Page",
+                isPresented: Binding(
+                    get: { errorMessage != nil },
+                    set: { if !$0 { errorMessage = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { errorMessage = nil }
+            } message: {
+                Text(errorMessage ?? "Unknown error")
             }
         }
     }
@@ -197,7 +286,7 @@ struct ScannerPageEditorView: View {
                         selectedPageID = page.id
                     } label: {
                         VStack(spacing: 4) {
-                            Image(uiImage: page.image)
+                            Image(uiImage: page.renderedImage)
                                 .resizable()
                                 .scaledToFill()
                                 .frame(width: 54, height: 72)
@@ -205,7 +294,9 @@ struct ScannerPageEditorView: View {
                                 .overlay {
                                     RoundedRectangle(cornerRadius: 6)
                                         .stroke(
-                                            selectedPageID == page.id ? Color.accentColor : Color.secondary.opacity(0.35),
+                                            selectedPageID == page.id
+                                                ? Color.accentColor
+                                                : Color.secondary.opacity(0.35),
                                             lineWidth: selectedPageID == page.id ? 3 : 1
                                         )
                                 }
@@ -253,12 +344,18 @@ private struct ManualPageCropView: View {
     let image: UIImage
     let onApply: (ScannerV2Quadrilateral) -> Void
 
-    @State private var quadrilateral = ScannerV2Quadrilateral(
-        topLeft: CGPoint(x: 0.02, y: 0.98),
-        topRight: CGPoint(x: 0.98, y: 0.98),
-        bottomRight: CGPoint(x: 0.98, y: 0.02),
-        bottomLeft: CGPoint(x: 0.02, y: 0.02)
-    )
+    @State private var quadrilateral: ScannerV2Quadrilateral
+    @State private var activePoint: CGPoint?
+
+    init(
+        image: UIImage,
+        quadrilateral: ScannerV2Quadrilateral,
+        onApply: @escaping (ScannerV2Quadrilateral) -> Void
+    ) {
+        self.image = image
+        self.onApply = onApply
+        _quadrilateral = State(initialValue: quadrilateral)
+    }
 
     var body: some View {
         NavigationStack {
@@ -283,46 +380,77 @@ private struct ManualPageCropView: View {
                     handle(
                         for: quadrilateral.topLeft,
                         in: imageFrame,
-                        update: { quadrilateral = ScannerV2Quadrilateral(
-                            topLeft: $0,
-                            topRight: quadrilateral.topRight,
-                            bottomRight: quadrilateral.bottomRight,
-                            bottomLeft: quadrilateral.bottomLeft
-                        )}
+                        update: {
+                            quadrilateral = ScannerV2Quadrilateral(
+                                topLeft: $0,
+                                topRight: quadrilateral.topRight,
+                                bottomRight: quadrilateral.bottomRight,
+                                bottomLeft: quadrilateral.bottomLeft
+                            )
+                        }
                     )
                     handle(
                         for: quadrilateral.topRight,
                         in: imageFrame,
-                        update: { quadrilateral = ScannerV2Quadrilateral(
-                            topLeft: quadrilateral.topLeft,
-                            topRight: $0,
-                            bottomRight: quadrilateral.bottomRight,
-                            bottomLeft: quadrilateral.bottomLeft
-                        )}
+                        update: {
+                            quadrilateral = ScannerV2Quadrilateral(
+                                topLeft: quadrilateral.topLeft,
+                                topRight: $0,
+                                bottomRight: quadrilateral.bottomRight,
+                                bottomLeft: quadrilateral.bottomLeft
+                            )
+                        }
                     )
                     handle(
                         for: quadrilateral.bottomRight,
                         in: imageFrame,
-                        update: { quadrilateral = ScannerV2Quadrilateral(
-                            topLeft: quadrilateral.topLeft,
-                            topRight: quadrilateral.topRight,
-                            bottomRight: $0,
-                            bottomLeft: quadrilateral.bottomLeft
-                        )}
+                        update: {
+                            quadrilateral = ScannerV2Quadrilateral(
+                                topLeft: quadrilateral.topLeft,
+                                topRight: quadrilateral.topRight,
+                                bottomRight: $0,
+                                bottomLeft: quadrilateral.bottomLeft
+                            )
+                        }
                     )
                     handle(
                         for: quadrilateral.bottomLeft,
                         in: imageFrame,
-                        update: { quadrilateral = ScannerV2Quadrilateral(
-                            topLeft: quadrilateral.topLeft,
-                            topRight: quadrilateral.topRight,
-                            bottomRight: quadrilateral.bottomRight,
-                            bottomLeft: $0
-                        )}
+                        update: {
+                            quadrilateral = ScannerV2Quadrilateral(
+                                topLeft: quadrilateral.topLeft,
+                                topRight: quadrilateral.topRight,
+                                bottomRight: quadrilateral.bottomRight,
+                                bottomLeft: $0
+                            )
+                        }
                     )
+
+                    if let activePoint,
+                       let magnified = magnifiedImage(at: activePoint) {
+                        VStack {
+                            ZStack {
+                                Image(uiImage: magnified)
+                                    .resizable()
+                                    .scaledToFill()
+                                Rectangle()
+                                    .fill(Color.yellow)
+                                    .frame(width: 1, height: 86)
+                                Rectangle()
+                                    .fill(Color.yellow)
+                                    .frame(width: 86, height: 1)
+                            }
+                            .frame(width: 96, height: 96)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(Color.white, lineWidth: 3))
+                            .shadow(radius: 4)
+                            Spacer()
+                        }
+                        .padding(.top, 18)
+                    }
                 }
             }
-            .navigationTitle("Crop")
+            .navigationTitle("Adjust Corners")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -333,6 +461,7 @@ private struct ManualPageCropView: View {
                         onApply(quadrilateral)
                         dismiss()
                     }
+                    .disabled(!quadrilateral.isValidCrop)
                 }
             }
         }
@@ -358,16 +487,50 @@ private struct ManualPageCropView: View {
         in frame: CGRect,
         update: @escaping (CGPoint) -> Void
     ) -> some View {
-        Circle()
-            .fill(Color.yellow)
-            .frame(width: 28, height: 28)
-            .position(viewPoint(point, in: frame))
-            .gesture(
-                DragGesture()
-                    .onChanged { value in
-                        update(normalizedPoint(value.location, in: frame))
-                    }
-            )
+        ZStack {
+            Circle()
+                .fill(Color.yellow)
+                .frame(width: 24, height: 24)
+            Circle()
+                .fill(Color.clear)
+                .frame(width: 52, height: 52)
+                .contentShape(Circle())
+        }
+        .position(viewPoint(point, in: frame))
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    let normalized = normalizedPoint(value.location, in: frame)
+                    activePoint = normalized
+                    update(normalized)
+                }
+                .onEnded { _ in
+                    activePoint = nil
+                }
+        )
+    }
+
+    private func magnifiedImage(at point: CGPoint) -> UIImage? {
+        guard let cgImage = image.cgImage else { return nil }
+
+        let width = CGFloat(cgImage.width)
+        let height = CGFloat(cgImage.height)
+        let center = CGPoint(
+            x: point.x * width,
+            y: (1 - point.y) * height
+        )
+        let side = max(40, min(width, height) * 0.12)
+        var crop = CGRect(
+            x: center.x - side / 2,
+            y: center.y - side / 2,
+            width: side,
+            height: side
+        )
+        crop.origin.x = min(max(0, crop.origin.x), max(0, width - side))
+        crop.origin.y = min(max(0, crop.origin.y), max(0, height - side))
+
+        guard let cropped = cgImage.cropping(to: crop.integral) else { return nil }
+        return UIImage(cgImage: cropped, scale: image.scale, orientation: .up)
     }
 
     private func viewPoint(_ point: CGPoint, in frame: CGRect) -> CGPoint {
