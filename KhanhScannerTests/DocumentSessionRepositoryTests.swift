@@ -160,6 +160,85 @@ final class DocumentSessionRepositoryTests: XCTestCase {
         )
     }
 
+    func testEditablePageRecordPersistsSourceCropRotationAndRenderedImage() throws {
+        let repository = DocumentSessionRepository(rootURL: rootURL)
+        let session = try repository.createSession()
+        let pageID = UUID()
+        let crop = ScannerV2Quadrilateral(
+            topLeft: CGPoint(x: 0.12, y: 0.91),
+            topRight: CGPoint(x: 0.88, y: 0.89),
+            bottomRight: CGPoint(x: 0.86, y: 0.11),
+            bottomLeft: CGPoint(x: 0.14, y: 0.09)
+        )
+        let page = DocumentPage(
+            id: pageID,
+            cropQuadrilateral: crop,
+            rotation: .clockwise90,
+            isLegacySource: false
+        )
+        let source = image(color: .red, size: CGSize(width: 120, height: 180))
+        let rendered = image(color: .blue, size: CGSize(width: 80, height: 110))
+
+        _ = try repository.appendPageRecords(
+            [DocumentPageAssets(page: page, sourceImage: source, renderedImage: rendered)],
+            to: session.id
+        )
+
+        let reloadedRepository = DocumentSessionRepository(rootURL: rootURL)
+        let records = try reloadedRepository.pageRecords(for: session.id)
+        let reloaded = try XCTUnwrap(records.first)
+        let reloadedSource = try reloadedRepository.sourceImage(for: pageID, in: session.id)
+        let reloadedRendered = try reloadedRepository.renderedImage(for: pageID, in: session.id)
+
+        XCTAssertEqual(records.map(\.id), [pageID])
+        XCTAssertEqual(reloaded.cropQuadrilateral, crop)
+        XCTAssertEqual(reloaded.rotation, .clockwise90)
+        XCTAssertFalse(reloaded.isLegacySource)
+        XCTAssertEqual(reloadedSource.size, source.size)
+        XCTAssertEqual(reloadedRendered.size, rendered.size)
+    }
+
+    func testLegacyFlatPNGLoadsAsFullBoundsEditablePage() throws {
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+
+        let sessionID = UUID()
+        let pageID = UUID()
+        let createdAt = "2026-09-18T12:00:00Z"
+        let legacy = """
+        {
+          "version": 2,
+          "sessions": [{
+            "id": "\(sessionID.uuidString)",
+            "createdAt": "\(createdAt)",
+            "modifiedAt": "\(createdAt)",
+            "pageIDs": ["\(pageID.uuidString)"]
+          }],
+          "folders": []
+        }
+        """
+        try Data(legacy.utf8).write(to: rootURL.appendingPathComponent("sessions.json"))
+
+        let pageDirectory = rootURL
+            .appendingPathComponent("Pages", isDirectory: true)
+            .appendingPathComponent(sessionID.uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: pageDirectory, withIntermediateDirectories: true)
+        let legacyImage = image(color: .green, size: CGSize(width: 60, height: 90))
+        try XCTUnwrap(legacyImage.pngData()).write(
+            to: pageDirectory.appendingPathComponent("\(pageID.uuidString).png")
+        )
+
+        let repository = DocumentSessionRepository(rootURL: rootURL)
+        let record = try XCTUnwrap(repository.pageRecords(for: sessionID).first)
+        let source = try repository.sourceImage(for: pageID, in: sessionID)
+        let rendered = try repository.renderedImage(for: pageID, in: sessionID)
+
+        XCTAssertTrue(record.isLegacySource)
+        XCTAssertEqual(record.rotation, .none)
+        XCTAssertEqual(record.cropQuadrilateral, .fullBounds)
+        XCTAssertEqual(source.size, legacyImage.size)
+        XCTAssertEqual(rendered.size, legacyImage.size)
+    }
+
     func testNestedFoldersPersistWithoutDepthLimitInTheModel() throws {
         let repository = DocumentSessionRepository(rootURL: rootURL)
         let project = try repository.createFolder(name: "Project A")
