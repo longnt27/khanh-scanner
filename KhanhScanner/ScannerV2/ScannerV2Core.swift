@@ -330,6 +330,36 @@ struct ScannerV2CameraMotionTracker {
     }
 }
 
+struct ScannerV2AutoCaptureRearmGate {
+    let requiredMissingFrames: Int
+    private(set) var isArmed = true
+    private var consecutiveMissingFrames = 0
+
+    init(requiredMissingFrames: Int = 8) {
+        self.requiredMissingFrames = max(1, requiredMissingFrames)
+    }
+
+    mutating func markCaptured() {
+        isArmed = false
+        consecutiveMissingFrames = 0
+    }
+
+    mutating func observeDocument(present: Bool) {
+        guard !isArmed else { return }
+
+        if present {
+            consecutiveMissingFrames = 0
+            return
+        }
+
+        consecutiveMissingFrames += 1
+        if consecutiveMissingFrames >= requiredMissingFrames {
+            isArmed = true
+            consecutiveMissingFrames = 0
+        }
+    }
+}
+
 struct ScannerV2PageChangeDetector {
     let minimumChange: CGFloat
     let minimumContentChange: Float
