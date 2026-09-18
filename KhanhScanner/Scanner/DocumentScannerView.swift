@@ -9,7 +9,6 @@ enum ScanDismissalPolicy {
 
 struct DocumentScannerView: UIViewControllerRepresentable {
     let onScan: ([UIImage]) -> Void
-    let onRejected: (Int) -> Void
     let onFailure: (Error) -> Void
     let onCancel: () -> Void
 
@@ -36,18 +35,8 @@ struct DocumentScannerView: UIViewControllerRepresentable {
             didFinishWith scan: VNDocumentCameraScan
         ) {
             let pages = (0..<scan.pageCount).map { scan.imageOfPage(at: $0) }
-            DispatchQueue.global(qos: .userInitiated).async { [parent] in
-                let validation = ScannedPageQualityValidator.validate(pages)
-                DispatchQueue.main.async {
-                    controller.dismiss(animated: true) {
-                        if !validation.acceptedPages.isEmpty {
-                            parent.onScan(validation.acceptedPages)
-                        }
-                        if validation.rejectedPageCount > 0 {
-                            parent.onRejected(validation.rejectedPageCount)
-                        }
-                    }
-                }
+            controller.dismiss(animated: true) { [parent] in
+                parent.onScan(pages)
             }
         }
 
