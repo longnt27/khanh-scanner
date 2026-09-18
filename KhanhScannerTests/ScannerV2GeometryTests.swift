@@ -292,6 +292,31 @@ final class ScannerV2GeometryTests: XCTestCase {
         XCTAssertTrue(detector.canCapture(page.offset(dx: 0.12, dy: 0)))
     }
 
+    func testPageChangeDetectorRejectsSameContentAfterLargeGeometryMove() throws {
+        var detector = ScannerV2PageChangeDetector(
+            minimumChange: 0.05,
+            minimumContentChange: 0.12
+        )
+        let geometry = ScannerV2Quadrilateral(
+            topLeft: CGPoint(x: 0.2, y: 0.8),
+            topRight: CGPoint(x: 0.8, y: 0.8),
+            bottomRight: CGPoint(x: 0.8, y: 0.2),
+            bottomLeft: CGPoint(x: 0.2, y: 0.2)
+        )
+        let fingerprint = try XCTUnwrap(
+            ScannerV2ImageProcessor.pageFingerprint(of: fingerprintPage(variant: 0))
+        )
+
+        detector.markCaptured(geometry, fingerprint: fingerprint)
+
+        XCTAssertFalse(
+            detector.canCapture(
+                geometry.offset(dx: 0.14, dy: -0.08),
+                fingerprint: fingerprint
+            )
+        )
+    }
+
     func testSharpnessEstimatorDistinguishesEdgesFromFlatImage() {
         let flat = testImage(checkerboard: false)
         let sharp = testImage(checkerboard: true)
