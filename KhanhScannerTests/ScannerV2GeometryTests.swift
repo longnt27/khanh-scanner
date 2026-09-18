@@ -176,6 +176,27 @@ final class ScannerV2GeometryTests: XCTestCase {
             .holdSteady
         )
     }
+    func testViewportMapperDoesNotRotatePortraitVisionCoordinatesTwice() {
+        let viewport = CGSize(width: 832, height: 1797)
+        let orientedImage = CGSize(width: 1440, height: 1920)
+
+        let center = ScannerV2ViewportMapper.viewPoint(
+            for: CGPoint(x: 0.5, y: 0.5),
+            orientedImageSize: orientedImage,
+            viewportSize: viewport
+        )
+        XCTAssertEqual(center.x, 416, accuracy: 0.5)
+        XCTAssertEqual(center.y, 898.5, accuracy: 0.5)
+
+        let upperLeftQuarter = ScannerV2ViewportMapper.viewPoint(
+            for: CGPoint(x: 0.25, y: 0.75),
+            orientedImageSize: orientedImage,
+            viewportSize: viewport
+        )
+        XCTAssertEqual(upperLeftQuarter.x, 79.1, accuracy: 1.0)
+        XCTAssertEqual(upperLeftQuarter.y, 449.25, accuracy: 1.0)
+    }
+
     func testPlaneRectangleScoreWorksDirectlyIn3D() {
         let points = [
             SIMD3<Float>(-0.105, 0, 0.1485),
