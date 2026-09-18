@@ -1,5 +1,11 @@
 import SwiftUI
 
+enum ScanDismissalPolicy {
+    static func protect(_ controller: UIViewController) {
+        controller.isModalInPresentation = true
+    }
+}
+
 struct DocumentScannerView: UIViewControllerRepresentable {
     let onScan: ([UIImage]) -> Void
     let onFailure: (Error) -> Void
@@ -10,6 +16,7 @@ struct DocumentScannerView: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> DocumentCameraViewController {
         let controller = DocumentCameraViewController()
         controller.delegate = context.coordinator
+        ScanDismissalPolicy.protect(controller)
         return controller
     }
 

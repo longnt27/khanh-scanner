@@ -1,53 +1,55 @@
 import SwiftUI
 
 struct ContentView: View {
-    @State private var pages: [UIImage] = []
+    @StateObject private var library = DocumentLibrary()
+    @State private var path: [LibraryRoute] = []
+    @State private var scanningSessionID: UUID?
     @State private var showingScanner = false
-    @State private var shareURL: URL?
-    @State private var showingShare = false
     @State private var errorMessage: String?
     @State private var isProcessing = false
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if pages.isEmpty {
-                    VStack(spacing: 22) {
-                        Image(systemName: "doc.viewfinder")
-                            .font(.system(size: 72))
-                            .foregroundStyle(.tint)
-                        Text("Khanh Scanner").font(.largeTitle.bold())
-                        Text("Clean paper scans. Black text. Colored signatures and stamps stay colored.")
-                            .multilineTextAlignment(.center)
-                            .foregroundStyle(.secondary)
-                        Button { showingScanner = true } label: {
-                            Label("Scan Document", systemImage: "camera.viewfinder")
-                                .font(.headline)
-                                .padding(.horizontal, 18)
-                                .padding(.vertical, 8)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(isProcessing || !DocumentCameraViewController.isSupported)
-
-                        if !DocumentCameraViewController.isSupported {
-                            Text("Document scanning requires a supported iPhone or iPad.")
-                                .font(.footnote).foregroundStyle(.secondary)
-                        }
-                        if isProcessing { ProgressView("Enhancing pages…") }
+        NavigationStack(path: $path) {
+            LibraryBrowserView(
+                library: library,
+                currentFolderID: nil,
+                canScan: !isProcessing && DocumentCameraViewController.isSupported,
+                onNewDocument: newDocument
+            )
+            .navigationDestination(for: LibraryRoute.self) { route in
+                switch route {
+                case let .session(sessionID):
+                    DocumentSessionView(library: library, sessionID: sessionID) {
+                        beginScanning(sessionID: sessionID)
                     }
-                    .padding(28)
-                } else {
-                    ScanPreviewView(pages: pages, onExport: exportPDF, onRescan: { showingScanner = true })
+                case let .folder(folderID):
+                    LibraryBrowserView(
+                        library: library,
+                        currentFolderID: folderID,
+                        canScan: !isProcessing && DocumentCameraViewController.isSupported,
+                        onNewDocument: newDocument
+                    )
+                }
+            }
+            .overlay {
+                if isProcessing {
+                    ProgressView("Saving pages…")
+                        .padding()
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
                 }
             }
         }
-        .sheet(isPresented: $showingScanner) {
-            DocumentScannerView(onScan: process, onFailure: { error in
+        .fullScreenCover(isPresented: $showingScanner) {
+            DocumentScannerView(onScan: { captured in
+                showingScanner = false
+                process(captured, for: scanningSessionID)
+            }, onFailure: { error in
+                showingScanner = false
                 errorMessage = error.localizedDescription
-            }, onCancel: {})
-        }
-        .sheet(isPresented: $showingShare) {
-            if let shareURL { ShareSheet(items: [shareURL]) }
+            }, onCancel: {
+                showingScanner = false
+            })
+            .interactiveDismissDisabled()
         }
         .alert("Khanh Scanner", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("OK", role: .cancel) { errorMessage = nil }
@@ -56,24 +58,35 @@ struct ContentView: View {
         }
     }
 
-    private func process(_ captured: [UIImage]) {
+    private func newDocument(in folderID: UUID?) {
+        do {
+            let session = try library.createSession(in: folderID)
+            path.append(.session(session.id))
+            beginScanning(sessionID: session.id)
+        } catch {
+            errorMessage = "Could not create document: \(error.localizedDescription)"
+        }
+    }
+
+    private func beginScanning(sessionID: UUID) {
+        scanningSessionID = sessionID
+        showingScanner = true
+    }
+
+    private func process(_ captured: [UIImage], for sessionID: UUID?) {
+        guard let sessionID else { return }
         isProcessing = true
         Task.detached(priority: .userInitiated) {
             let enhancer = DocumentEnhancer()
             let enhanced = captured.map { image in (try? enhancer.enhance(image)) ?? image }
             await MainActor.run {
-                pages = enhanced
+                do {
+                    try library.appendPages(enhanced, to: sessionID)
+                } catch {
+                    errorMessage = "Could not save pages: \(error.localizedDescription)"
+                }
                 isProcessing = false
             }
-        }
-    }
-
-    private func exportPDF() {
-        do {
-            shareURL = try PDFFileWriter.write(PDFExporter.makePDF(from: pages))
-            showingShare = true
-        } catch {
-            errorMessage = "Could not create PDF: \(error.localizedDescription)"
         }
     }
 }

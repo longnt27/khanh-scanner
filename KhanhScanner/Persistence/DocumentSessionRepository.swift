@@ -1,0 +1,298 @@
+import Foundation
+import UIKit
+
+enum DocumentSessionRepositoryError: LocalizedError {
+    case sessionNotFound
+    case folderNotFound
+    case invalidFolderName
+    case cyclicFolderRelationship
+    case folderNotEmpty
+    case imageEncodingFailed
+    case pageAssetMissing
+
+    var errorDescription: String? {
+        switch self {
+        case .sessionNotFound: "The document session no longer exists."
+        case .folderNotFound: "The folder no longer exists."
+        case .invalidFolderName: "Enter a folder name."
+        case .cyclicFolderRelationship: "A folder cannot be moved into itself or one of its subfolders."
+        case .folderNotEmpty: "Move this folder's contents before deleting it."
+        case .imageEncodingFailed: "A scanned page could not be saved."
+        case .pageAssetMissing: "A saved page could not be loaded."
+        }
+    }
+}
+
+final class DocumentSessionRepository {
+    private struct Catalog: Codable {
+        let version: Int
+        var sessions: [DocumentSession]
+        var folders: [DocumentFolder]
+
+        init(version: Int = 2, sessions: [DocumentSession] = [], folders: [DocumentFolder] = []) {
+            self.version = version
+            self.sessions = sessions
+            self.folders = folders
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case version, sessions, folders
+        }
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            version = max(try values.decodeIfPresent(Int.self, forKey: .version) ?? 1, 2)
+            sessions = try values.decodeIfPresent([DocumentSession].self, forKey: .sessions) ?? []
+            folders = try values.decodeIfPresent([DocumentFolder].self, forKey: .folders) ?? []
+        }
+    }
+
+    private let rootURL: URL
+    private let fileManager: FileManager
+    private let encoder: JSONEncoder
+    private let decoder: JSONDecoder
+
+    init(rootURL: URL = DocumentSessionRepository.defaultRootURL(), fileManager: FileManager = .default) {
+        self.rootURL = rootURL
+        self.fileManager = fileManager
+        encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+    }
+
+    static func defaultRootURL(fileManager: FileManager = .default) -> URL {
+        let applicationSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fileManager.temporaryDirectory
+        return applicationSupport.appendingPathComponent("KhanhScanner", isDirectory: true)
+    }
+
+    func sessions() throws -> [DocumentSession] {
+        try loadCatalog().sessions.sorted { $0.modifiedAt > $1.modifiedAt }
+    }
+
+    func folders() throws -> [DocumentFolder] {
+        try loadCatalog().folders.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+
+    func session(id: UUID) throws -> DocumentSession? {
+        try loadCatalog().sessions.first { $0.id == id }
+    }
+
+    @discardableResult
+    func createSession(at date: Date = Date(), folderID: UUID? = nil) throws -> DocumentSession {
+        var catalog = try loadCatalog()
+        if let folderID, !catalog.folders.contains(where: { $0.id == folderID }) {
+            throw DocumentSessionRepositoryError.folderNotFound
+        }
+        let session = DocumentSession(createdAt: date, folderID: folderID)
+        catalog.sessions.append(session)
+        try saveCatalog(catalog)
+        return session
+    }
+
+    @discardableResult
+    func appendPages(_ images: [UIImage], to sessionID: UUID, modifiedAt: Date = Date()) throws -> DocumentSession {
+        var catalog = try loadCatalog()
+        guard let index = catalog.sessions.firstIndex(where: { $0.id == sessionID }) else {
+            throw DocumentSessionRepositoryError.sessionNotFound
+        }
+        guard !images.isEmpty else { return catalog.sessions[index] }
+
+        let directory = pageDirectory(for: sessionID)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        var newPageIDs: [UUID] = []
+
+        do {
+            for image in images {
+                guard let data = image.pngData() else {
+                    throw DocumentSessionRepositoryError.imageEncodingFailed
+                }
+                let pageID = UUID()
+                try data.write(to: pageURL(sessionID: sessionID, pageID: pageID), options: .atomic)
+                newPageIDs.append(pageID)
+            }
+            catalog.sessions[index].pageIDs.append(contentsOf: newPageIDs)
+            catalog.sessions[index].modifiedAt = modifiedAt
+            try saveCatalog(catalog)
+            return catalog.sessions[index]
+        } catch {
+            for pageID in newPageIDs {
+                try? fileManager.removeItem(at: pageURL(sessionID: sessionID, pageID: pageID))
+            }
+            throw error
+        }
+    }
+
+    func images(for session: DocumentSession) throws -> [UIImage] {
+        try session.pageIDs.map { pageID in
+            let url = pageURL(sessionID: session.id, pageID: pageID)
+            guard let data = try? Data(contentsOf: url), let image = UIImage(data: data) else {
+                throw DocumentSessionRepositoryError.pageAssetMissing
+            }
+            return image
+        }
+    }
+
+    @discardableResult
+    func setLifecycle(
+        _ lifecycle: DocumentLifecycle,
+        for sessionID: UUID,
+        modifiedAt: Date = Date()
+    ) throws -> DocumentSession {
+        var catalog = try loadCatalog()
+        guard let index = catalog.sessions.firstIndex(where: { $0.id == sessionID }) else {
+            throw DocumentSessionRepositoryError.sessionNotFound
+        }
+        catalog.sessions[index].lifecycle = lifecycle
+        catalog.sessions[index].modifiedAt = modifiedAt
+        try saveCatalog(catalog)
+        return catalog.sessions[index]
+    }
+
+    @discardableResult
+    func createFolder(
+        name: String,
+        parentFolderID: UUID? = nil,
+        sessionIDs: [UUID] = [],
+        folderIDs: [UUID] = [],
+        at date: Date = Date()
+    ) throws -> DocumentFolder {
+        var catalog = try loadCatalog()
+        let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedName.isEmpty else {
+            throw DocumentSessionRepositoryError.invalidFolderName
+        }
+        if let parentFolderID, !catalog.folders.contains(where: { $0.id == parentFolderID }) {
+            throw DocumentSessionRepositoryError.folderNotFound
+        }
+
+        let folder = DocumentFolder(name: normalizedName, parentFolderID: parentFolderID, createdAt: date)
+        catalog.folders.append(folder)
+        try moveItems(
+            sessionIDs: sessionIDs,
+            folderIDs: folderIDs,
+            to: folder.id,
+            modifiedAt: date,
+            catalog: &catalog
+        )
+        try saveCatalog(catalog)
+        return folder
+    }
+
+    func move(
+        sessionIDs: [UUID] = [],
+        folderIDs: [UUID] = [],
+        to destinationFolderID: UUID?,
+        modifiedAt: Date = Date()
+    ) throws {
+        var catalog = try loadCatalog()
+        try moveItems(
+            sessionIDs: sessionIDs,
+            folderIDs: folderIDs,
+            to: destinationFolderID,
+            modifiedAt: modifiedAt,
+            catalog: &catalog
+        )
+        try saveCatalog(catalog)
+    }
+
+    func deleteFolder(id: UUID) throws {
+        var catalog = try loadCatalog()
+        guard catalog.folders.contains(where: { $0.id == id }) else {
+            throw DocumentSessionRepositoryError.folderNotFound
+        }
+        let containsSessions = catalog.sessions.contains { $0.folderID == id }
+        let containsFolders = catalog.folders.contains { $0.parentFolderID == id }
+        guard !containsSessions && !containsFolders else {
+            throw DocumentSessionRepositoryError.folderNotEmpty
+        }
+        catalog.folders.removeAll { $0.id == id }
+        try saveCatalog(catalog)
+    }
+
+    func deleteSession(id: UUID) throws {
+        var catalog = try loadCatalog()
+        guard catalog.sessions.contains(where: { $0.id == id }) else {
+            throw DocumentSessionRepositoryError.sessionNotFound
+        }
+        catalog.sessions.removeAll { $0.id == id }
+        try saveCatalog(catalog)
+        let directory = pageDirectory(for: id)
+        if fileManager.fileExists(atPath: directory.path) {
+            try fileManager.removeItem(at: directory)
+        }
+    }
+
+    private var catalogURL: URL {
+        rootURL.appendingPathComponent("sessions.json")
+    }
+
+    private func pageDirectory(for sessionID: UUID) -> URL {
+        rootURL
+            .appendingPathComponent("Pages", isDirectory: true)
+            .appendingPathComponent(sessionID.uuidString, isDirectory: true)
+    }
+
+    private func pageURL(sessionID: UUID, pageID: UUID) -> URL {
+        pageDirectory(for: sessionID).appendingPathComponent("\(pageID.uuidString).png")
+    }
+
+    private func loadCatalog() throws -> Catalog {
+        guard fileManager.fileExists(atPath: catalogURL.path) else {
+            return Catalog()
+        }
+        return try decoder.decode(Catalog.self, from: Data(contentsOf: catalogURL))
+    }
+
+    private func saveCatalog(_ catalog: Catalog) throws {
+        try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        try encoder.encode(catalog).write(to: catalogURL, options: .atomic)
+    }
+
+    private func moveItems(
+        sessionIDs: [UUID],
+        folderIDs: [UUID],
+        to destinationFolderID: UUID?,
+        modifiedAt: Date,
+        catalog: inout Catalog
+    ) throws {
+        if let destinationFolderID,
+           !catalog.folders.contains(where: { $0.id == destinationFolderID }) {
+            throw DocumentSessionRepositoryError.folderNotFound
+        }
+
+        for sessionID in Set(sessionIDs) {
+            guard let index = catalog.sessions.firstIndex(where: { $0.id == sessionID }) else {
+                throw DocumentSessionRepositoryError.sessionNotFound
+            }
+            catalog.sessions[index].folderID = destinationFolderID
+            catalog.sessions[index].modifiedAt = modifiedAt
+        }
+
+        for folderID in Set(folderIDs) {
+            guard let index = catalog.folders.firstIndex(where: { $0.id == folderID }) else {
+                throw DocumentSessionRepositoryError.folderNotFound
+            }
+            if destinationFolderID == folderID
+                || isDescendant(destinationFolderID, of: folderID, folders: catalog.folders) {
+                throw DocumentSessionRepositoryError.cyclicFolderRelationship
+            }
+            catalog.folders[index].parentFolderID = destinationFolderID
+            catalog.folders[index].modifiedAt = modifiedAt
+        }
+    }
+
+    private func isDescendant(_ candidateID: UUID?, of ancestorID: UUID, folders: [DocumentFolder]) -> Bool {
+        var currentID = candidateID
+        var visited: Set<UUID> = []
+        while let id = currentID {
+            if id == ancestorID { return true }
+            guard visited.insert(id).inserted else { return true }
+            currentID = folders.first(where: { $0.id == id })?.parentFolderID
+        }
+        return false
+    }
+}
