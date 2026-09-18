@@ -226,6 +226,26 @@ enum ScannerV2CaptureReadiness: Equatable {
     case waitForCamera
     case tooSoft
     case ready
+    case captured
+
+    var statusText: String {
+        switch self {
+        case .noDocument:
+            "Find a document"
+        case .holdSteady:
+            "Hold steady"
+        case .alignDocument:
+            "Align the page"
+        case .waitForCamera:
+            "Focusing…"
+        case .tooSoft:
+            "Hold steady for a sharper scan"
+        case .ready:
+            "Ready"
+        case .captured:
+            "Captured — move to next page"
+        }
+    }
 }
 
 enum ScannerV2CaptureGate {
