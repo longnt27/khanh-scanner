@@ -45,6 +45,41 @@ final class DocumentSessionRepositoryTests: XCTestCase {
         XCTAssertEqual(images[1].size, second.size)
     }
 
+    func testReplacePagesPersistsEditedOrderAndRemovesOldAssets() throws {
+        let repository = DocumentSessionRepository(rootURL: rootURL)
+        let session = try repository.createSession()
+        let original = try repository.appendPages(
+            [
+                image(color: .red, size: CGSize(width: 10, height: 20)),
+                image(color: .blue, size: CGSize(width: 30, height: 40))
+            ],
+            to: session.id
+        )
+
+        let modifiedAt = Date(timeIntervalSince1970: 1_900_000_000)
+        let updated = try repository.replacePages(
+            [
+                image(color: .green, size: CGSize(width: 7, height: 9)),
+                image(color: .orange, size: CGSize(width: 11, height: 13))
+            ],
+            in: session.id,
+            modifiedAt: modifiedAt
+        )
+        let reloaded = try XCTUnwrap(
+            try DocumentSessionRepository(rootURL: rootURL).session(id: session.id)
+        )
+        let images = try repository.images(for: reloaded)
+
+        XCTAssertEqual(reloaded.pageIDs, updated.pageIDs)
+        XCTAssertNotEqual(reloaded.pageIDs, original.pageIDs)
+        XCTAssertEqual(reloaded.modifiedAt, modifiedAt)
+        XCTAssertEqual(images.map(\.size), [
+            CGSize(width: 7, height: 9),
+            CGSize(width: 11, height: 13)
+        ])
+        XCTAssertThrowsError(try repository.images(for: original))
+    }
+
     func testDeleteSessionRemovesMetadataAndPageAssets() throws {
         let repository = DocumentSessionRepository(rootURL: rootURL)
         let session = try repository.createSession()
