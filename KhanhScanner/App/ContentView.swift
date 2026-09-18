@@ -2,53 +2,82 @@ import SwiftUI
 import VisionKit
 
 struct ContentView: View {
-    @State private var pages: [UIImage] = []
+    @StateObject private var library = DocumentLibrary()
+    @State private var path: [UUID] = []
+    @State private var scanningSessionID: UUID?
     @State private var showingScanner = false
-    @State private var shareURL: URL?
-    @State private var showingShare = false
     @State private var errorMessage: String?
     @State private var isProcessing = false
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if pages.isEmpty {
-                    VStack(spacing: 22) {
-                        Image(systemName: "doc.viewfinder")
-                            .font(.system(size: 72))
-                            .foregroundStyle(.tint)
-                        Text("Khanh Scanner").font(.largeTitle.bold())
-                        Text("Clean paper scans. Black text. Colored signatures and stamps stay colored.")
-                            .multilineTextAlignment(.center)
-                            .foregroundStyle(.secondary)
-                        Button { showingScanner = true } label: {
-                            Label("Scan Document", systemImage: "camera.viewfinder")
-                                .font(.headline)
-                                .padding(.horizontal, 18)
-                                .padding(.vertical, 8)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(isProcessing || !VNDocumentCameraViewController.isSupported)
-
-                        if !VNDocumentCameraViewController.isSupported {
-                            Text("Document scanning requires a supported iPhone or iPad.")
-                                .font(.footnote).foregroundStyle(.secondary)
-                        }
-                        if isProcessing { ProgressView("Enhancing pages…") }
-                    }
-                    .padding(28)
+        NavigationStack(path: $path) {
+            List {
+                if library.sessions.isEmpty {
+                    ContentUnavailableView(
+                        "No Documents",
+                        systemImage: "doc.viewfinder",
+                        description: Text("Start a scan. It will be saved before the camera opens.")
+                    )
+                    .listRowBackground(Color.clear)
                 } else {
-                    ScanPreviewView(pages: pages, onExport: exportPDF, onRescan: { showingScanner = true })
+                    ForEach(library.sessions) { session in
+                        NavigationLink(value: session.id) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(session.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.headline)
+                                Text("\(session.pageIDs.count) page\(session.pageIDs.count == 1 ? "" : "s")")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Khanh Scanner")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: newDocument) {
+                        Label("New Document Scan", systemImage: "plus")
+                    }
+                    .disabled(isProcessing || !VNDocumentCameraViewController.isSupported)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if library.sessions.isEmpty {
+                    Button(action: newDocument) {
+                        Label("New Document Scan", systemImage: "camera.viewfinder")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .padding()
+                    .disabled(isProcessing || !VNDocumentCameraViewController.isSupported)
+                }
+            }
+            .overlay {
+                if isProcessing {
+                    ProgressView("Saving pages…")
+                        .padding()
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+            .navigationDestination(for: UUID.self) { sessionID in
+                DocumentSessionView(library: library, sessionID: sessionID) {
+                    beginScanning(sessionID: sessionID)
                 }
             }
         }
         .sheet(isPresented: $showingScanner) {
-            DocumentScannerView(onScan: process, onFailure: { error in
+            DocumentScannerView(onScan: { captured in
+                showingScanner = false
+                process(captured, for: scanningSessionID)
+            }, onFailure: { error in
+                showingScanner = false
                 errorMessage = error.localizedDescription
-            }, onCancel: {})
-        }
-        .sheet(isPresented: $showingShare) {
-            if let shareURL { ShareSheet(items: [shareURL]) }
+            }, onCancel: {
+                showingScanner = false
+            })
         }
         .alert("Khanh Scanner", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("OK", role: .cancel) { errorMessage = nil }
@@ -57,24 +86,35 @@ struct ContentView: View {
         }
     }
 
-    private func process(_ captured: [UIImage]) {
+    private func newDocument() {
+        do {
+            let session = try library.createSession()
+            path.append(session.id)
+            beginScanning(sessionID: session.id)
+        } catch {
+            errorMessage = "Could not create document: \(error.localizedDescription)"
+        }
+    }
+
+    private func beginScanning(sessionID: UUID) {
+        scanningSessionID = sessionID
+        showingScanner = true
+    }
+
+    private func process(_ captured: [UIImage], for sessionID: UUID?) {
+        guard let sessionID else { return }
         isProcessing = true
         Task.detached(priority: .userInitiated) {
             let enhancer = DocumentEnhancer()
             let enhanced = captured.map { image in (try? enhancer.enhance(image)) ?? image }
             await MainActor.run {
-                pages = enhanced
+                do {
+                    try library.appendPages(enhanced, to: sessionID)
+                } catch {
+                    errorMessage = "Could not save pages: \(error.localizedDescription)"
+                }
                 isProcessing = false
             }
-        }
-    }
-
-    private func exportPDF() {
-        do {
-            shareURL = try PDFFileWriter.write(PDFExporter.makePDF(from: pages))
-            showingShare = true
-        } catch {
-            errorMessage = "Could not create PDF: \(error.localizedDescription)"
         }
     }
 }
