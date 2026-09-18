@@ -40,7 +40,7 @@ struct ContentView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingScanner) {
+        .fullScreenCover(isPresented: $showingScanner) {
             DocumentScannerView(onScan: { captured in
                 showingScanner = false
                 process(captured, for: scanningSessionID)
@@ -50,6 +50,7 @@ struct ContentView: View {
             }, onCancel: {
                 showingScanner = false
             })
+            .interactiveDismissDisabled()
         }
         .alert("Khanh Scanner", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("OK", role: .cancel) { errorMessage = nil }
