@@ -64,10 +64,8 @@ final class ScannerV2ViewController: UIViewController {
     private var isCapturing = false
     private var isFinishing = false
 
-    init(initialPages: [UIImage] = []) {
-        pages = initialPages.map {
-            ScannerPageDraft(image: $0, needsEnhancement: false)
-        }
+    init(initialPages: [ScannerPageDraft] = []) {
+        pages = initialPages
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -411,11 +409,25 @@ final class ScannerV2ViewController: UIViewController {
                         return
                     }
 
+                    guard let sourceCGImage = ScannerV2ImageProcessor.cgImage(
+                        from: frame.capturedImage,
+                        orientation: .right
+                    ) else {
+                        DispatchQueue.main.async {
+                            self.completeCaptureFailure(ScannerV2Error.highResolutionCaptureFailed)
+                        }
+                        return
+                    }
+                    let sourceImage = UIImage(cgImage: sourceCGImage)
+
                     DispatchQueue.main.async {
                         self.pages.append(
                             ScannerPageDraft(
-                                image: corrected,
-                                needsEnhancement: true
+                                sourceImage: sourceImage,
+                                cropQuadrilateral: quadrilateral,
+                                renderedImage: corrected,
+                                needsEnhancement: true,
+                                isLegacySource: false
                             )
                         )
                         self.pageChangeDetector.markCaptured(
@@ -447,22 +459,20 @@ final class ScannerV2ViewController: UIViewController {
         weak var weakHost: UIViewController?
         let editor = ScannerPageEditorView(
             pages: pages,
+            initialPageID: pages.last?.id,
             onCancel: { [weak self] in
                 weakHost?.dismiss(animated: true) {
                     self?.resumeSessionAfterEditing()
                 }
             },
-            onSave: { [weak self] updatedPages in
+            onDone: { [weak self] updatedPages in
                 guard let self else { return }
                 self.pages = updatedPages
                 self.pageChangeDetector.reset()
                 self.stabilityTracker.reset()
-                if !updatedPages.isEmpty {
-                    self.autoCaptureRearmGate.markCaptured()
-                }
                 self.updatePageUI()
                 weakHost?.dismiss(animated: true) {
-                    self.resumeSessionAfterEditing()
+                    self.finishScanning()
                 }
             }
         )
