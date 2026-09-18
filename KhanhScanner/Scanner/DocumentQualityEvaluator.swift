@@ -74,6 +74,7 @@ private enum DocumentCornerFoldAnalyzer {
         image: GrayscaleImage
     ) -> Bool {
         var signedDifferences: [Double] = []
+        var innerBoundaryValues: [Double] = []
 
         for index in 0..<sampleCount {
             let progress = 0.25 + 0.5 * (Double(index) + 0.5) / Double(sampleCount)
@@ -92,6 +93,7 @@ private enum DocumentCornerFoldAnalyzer {
                 image: image
             )
             signedDifferences.append(Double(inner) - Double(outer))
+            innerBoundaryValues.append(Double(inner))
         }
 
         let meanDifference = signedDifferences.reduce(0, +) / Double(signedDifferences.count)
@@ -112,10 +114,12 @@ private enum DocumentCornerFoldAnalyzer {
         )
         guard !outerValues.isEmpty else { return false }
         let mean = outerValues.reduce(0, +) / Double(outerValues.count)
+        let innerMean = innerBoundaryValues.reduce(0, +) / Double(innerBoundaryValues.count)
         let variance = outerValues.reduce(0) { total, value in
             total + pow(value - mean, 2)
         } / Double(outerValues.count)
-        return sqrt(variance) <= maximumOuterDeviation
+        return abs(innerMean - mean) >= minimumSeparation
+            && sqrt(variance) <= maximumOuterDeviation
     }
 
     private static func outerTriangleSamples(
