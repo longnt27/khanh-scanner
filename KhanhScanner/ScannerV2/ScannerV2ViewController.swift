@@ -315,16 +315,7 @@ final class ScannerV2ViewController: UIViewController {
         shutterButton.isEnabled = false
         statusLabel.text = "Capturing…"
 
-        let photoSettings: AVCapturePhotoSettings?
-        if let format = configuration?.videoFormat {
-            let settings = format.defaultPhotoSettings
-            settings.photoQualityPrioritization = .quality
-            photoSettings = settings
-        } else {
-            photoSettings = nil
-        }
-
-        sceneView.session.captureHighResolutionFrame(using: photoSettings) { [weak self] frame, error in
+        sceneView.session.captureHighResolutionFrame { [weak self] frame, error in
             guard let self else { return }
 
             if let error {
