@@ -241,20 +241,17 @@ final class ScannerV2ViewController: UIViewController {
                     bottomLeft: observation.bottomLeft
                 )
 
-                let analyzedImage = ScannerV2ImageProcessor.cgImage(
+                let signals = ScannerV2ImageProcessor.documentSignals(
                     from: pixelBuffer,
+                    quadrilateral: quadrilateral,
                     orientation: .right
                 )
-                let sharpness = analyzedImage.map(ScannerV2ImageProcessor.sharpnessScore(of:)) ?? 0
-                let fingerprint = analyzedImage.flatMap {
-                    ScannerV2ImageProcessor.pageFingerprint(of: UIImage(cgImage: $0))
-                }
 
                 DispatchQueue.main.async { [weak self] in
                     self?.handle(
                         quadrilateral: quadrilateral,
-                        fingerprint: fingerprint,
-                        sharpness: sharpness,
+                        fingerprint: signals?.fingerprint,
+                        sharpness: signals?.sharpness ?? 0,
                         frame: frame,
                         cameraStable: cameraStable
                     )
@@ -367,16 +364,6 @@ final class ScannerV2ViewController: UIViewController {
                         bottomLeft: observation.bottomLeft
                     )
 
-                    if let cgImage = ScannerV2ImageProcessor.cgImage(
-                        from: frame.capturedImage,
-                        orientation: .right
-                    ), ScannerV2ImageProcessor.sharpnessScore(of: cgImage) < 0.18 {
-                        DispatchQueue.main.async {
-                            self.completeCaptureFailure(ScannerV2Error.highResolutionCaptureFailed)
-                        }
-                        return
-                    }
-
                     guard let corrected = ScannerV2ImageProcessor.correctedImage(
                         from: frame.capturedImage,
                         quadrilateral: quadrilateral,
@@ -384,6 +371,13 @@ final class ScannerV2ViewController: UIViewController {
                     ) else {
                         DispatchQueue.main.async {
                             self.completeCaptureFailure(ScannerV2Error.perspectiveCorrectionFailed)
+                        }
+                        return
+                    }
+
+                    guard ScannerV2ImageProcessor.sharpnessScore(of: corrected) >= 0.18 else {
+                        DispatchQueue.main.async {
+                            self.completeCaptureFailure(ScannerV2Error.highResolutionCaptureFailed)
                         }
                         return
                     }
