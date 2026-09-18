@@ -101,6 +101,22 @@ final class DocumentSessionRepository {
         }
     }
 
+    @discardableResult
+    func setLifecycle(
+        _ lifecycle: DocumentLifecycle,
+        for sessionID: UUID,
+        modifiedAt: Date = Date()
+    ) throws -> DocumentSession {
+        var catalog = try loadCatalog()
+        guard let index = catalog.sessions.firstIndex(where: { $0.id == sessionID }) else {
+            throw DocumentSessionRepositoryError.sessionNotFound
+        }
+        catalog.sessions[index].lifecycle = lifecycle
+        catalog.sessions[index].modifiedAt = modifiedAt
+        try saveCatalog(catalog)
+        return catalog.sessions[index]
+    }
+
     func deleteSession(id: UUID) throws {
         var catalog = try loadCatalog()
         guard catalog.sessions.contains(where: { $0.id == id }) else {

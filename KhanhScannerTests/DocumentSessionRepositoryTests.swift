@@ -57,6 +57,23 @@ final class DocumentSessionRepositoryTests: XCTestCase {
         XCTAssertThrowsError(try repository.images(for: sessionWithPage))
     }
 
+    func testLifecycleCanBeArchivedAndResumedWithoutChangingPages() throws {
+        let repository = DocumentSessionRepository(rootURL: rootURL)
+        let session = try repository.createSession()
+        let withPage = try repository.appendPages([image(color: .purple)], to: session.id)
+
+        let archived = try repository.setLifecycle(.archived, for: session.id)
+        let resumed = try repository.setLifecycle(.active, for: session.id)
+        let appended = try repository.appendPages([image(color: .orange)], to: session.id)
+        let reloaded = try XCTUnwrap(try DocumentSessionRepository(rootURL: rootURL).session(id: session.id))
+
+        XCTAssertEqual(archived.lifecycle, .archived)
+        XCTAssertEqual(resumed.lifecycle, .active)
+        XCTAssertEqual(reloaded.lifecycle, .active)
+        XCTAssertEqual(Array(appended.pageIDs.prefix(withPage.pageIDs.count)), withPage.pageIDs)
+        XCTAssertEqual(reloaded.pageIDs, appended.pageIDs)
+    }
+
     private func image(color: UIColor, size: CGSize = CGSize(width: 4, height: 4)) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1

@@ -25,7 +25,10 @@ struct ContentView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(session.createdAt.formatted(date: .abbreviated, time: .shortened))
                                     .font(.headline)
-                                Text("\(session.pageIDs.count) page\(session.pageIDs.count == 1 ? "" : "s")")
+                                Text(
+                                    "\(session.pageIDs.count) page\(session.pageIDs.count == 1 ? "" : "s") · "
+                                    + (session.lifecycle == .active ? "In Progress" : "Finished")
+                                )
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             }
