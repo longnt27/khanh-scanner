@@ -239,6 +239,57 @@ final class DocumentSessionRepositoryTests: XCTestCase {
         XCTAssertEqual(rendered.size, legacyImage.size)
     }
 
+    func testEditablePageCanUpdateReorderAndDeleteWithoutLosingOtherSources() throws {
+        let repository = DocumentSessionRepository(rootURL: rootURL)
+        let session = try repository.createSession()
+        let first = DocumentPage(id: UUID(), isLegacySource: false)
+        let second = DocumentPage(id: UUID(), isLegacySource: false)
+
+        _ = try repository.appendPageRecords(
+            [
+                DocumentPageAssets(
+                    page: first,
+                    sourceImage: image(color: .red, size: CGSize(width: 80, height: 120)),
+                    renderedImage: image(color: .red, size: CGSize(width: 60, height: 90))
+                ),
+                DocumentPageAssets(
+                    page: second,
+                    sourceImage: image(color: .blue, size: CGSize(width: 100, height: 140)),
+                    renderedImage: image(color: .blue, size: CGSize(width: 70, height: 100))
+                )
+            ],
+            to: session.id
+        )
+
+        var editedSecond = second
+        editedSecond.cropQuadrilateral = ScannerV2Quadrilateral(
+            topLeft: CGPoint(x: 0.1, y: 0.9),
+            topRight: CGPoint(x: 0.9, y: 0.9),
+            bottomRight: CGPoint(x: 0.9, y: 0.1),
+            bottomLeft: CGPoint(x: 0.1, y: 0.1)
+        )
+        editedSecond.rotation = .clockwise90
+        try repository.updatePage(
+            editedSecond,
+            in: session.id,
+            renderedImage: image(color: .cyan, size: CGSize(width: 90, height: 60))
+        )
+        try repository.reorderPages([second.id, first.id], in: session.id)
+
+        XCTAssertEqual(try repository.pageRecords(for: session.id).map(\.id), [second.id, first.id])
+        XCTAssertEqual(
+            try repository.pageRecords(for: session.id).first?.cropQuadrilateral,
+            editedSecond.cropQuadrilateral
+        )
+        XCTAssertEqual(try repository.sourceImage(for: first.id, in: session.id).size, CGSize(width: 80, height: 120))
+
+        try repository.deletePage(id: second.id, from: session.id)
+
+        XCTAssertEqual(try repository.pageRecords(for: session.id).map(\.id), [first.id])
+        XCTAssertThrowsError(try repository.sourceImage(for: second.id, in: session.id))
+        XCTAssertEqual(try repository.sourceImage(for: first.id, in: session.id).size, CGSize(width: 80, height: 120))
+    }
+
     func testNestedFoldersPersistWithoutDepthLimitInTheModel() throws {
         let repository = DocumentSessionRepository(rootURL: rootURL)
         let project = try repository.createFolder(name: "Project A")
