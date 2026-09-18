@@ -107,6 +107,154 @@ enum ScannerV2ImageProcessor {
         return ScannerV2PageFingerprint(bits: bits)
     }
 
+    static func trimBackgroundSlivers(
+        from image: UIImage,
+        maximumTrimFraction: CGFloat = 0.06
+    ) -> UIImage? {
+        guard let cgImage = normalizedCGImage(from: image),
+              cgImage.width > 8,
+              cgImage.height > 8 else {
+            return nil
+        }
+
+        let sourceWidth = cgImage.width
+        let sourceHeight = cgImage.height
+        let maxAnalysisDimension = 180
+        let analysisScale = min(
+            1,
+            CGFloat(maxAnalysisDimension) / CGFloat(max(sourceWidth, sourceHeight))
+        )
+        let analysisWidth = max(8, Int((CGFloat(sourceWidth) * analysisScale).rounded()))
+        let analysisHeight = max(8, Int((CGFloat(sourceHeight) * analysisScale).rounded()))
+
+        var pixels = [UInt8](repeating: 0, count: analysisWidth * analysisHeight)
+        let rendered = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(
+                data: buffer.baseAddress,
+                width: analysisWidth,
+                height: analysisHeight,
+                bitsPerComponent: 8,
+                bytesPerRow: analysisWidth,
+                space: CGColorSpaceCreateDeviceGray(),
+                bitmapInfo: CGImageAlphaInfo.none.rawValue
+            ) else {
+                return false
+            }
+            context.interpolationQuality = .medium
+            context.draw(
+                cgImage,
+                in: CGRect(x: 0, y: 0, width: analysisWidth, height: analysisHeight)
+            )
+            return true
+        }
+        guard rendered else { return image }
+
+        let sorted = pixels.sorted()
+        let paperIndex = min(
+            sorted.count - 1,
+            Int(Double(sorted.count - 1) * 0.88)
+        )
+        let paperLuma = CGFloat(sorted[paperIndex]) / 255
+        let paperThreshold = UInt8(
+            max(0, min(255, Int((max(0.48, paperLuma - 0.20) * 255).rounded())))
+        )
+
+        let maxTrimX = max(1, Int(CGFloat(analysisWidth) * maximumTrimFraction))
+        let maxTrimY = max(1, Int(CGFloat(analysisHeight) * maximumTrimFraction))
+
+        func columnPaperFraction(_ x: Int) -> CGFloat {
+            let start = analysisHeight / 12
+            let end = analysisHeight - start
+            guard end > start else { return 1 }
+            var paper = 0
+            for y in start..<end where pixels[y * analysisWidth + x] >= paperThreshold {
+                paper += 1
+            }
+            return CGFloat(paper) / CGFloat(end - start)
+        }
+
+        func rowPaperFraction(_ y: Int) -> CGFloat {
+            let start = analysisWidth / 12
+            let end = analysisWidth - start
+            guard end > start else { return 1 }
+            var paper = 0
+            for x in start..<end where pixels[y * analysisWidth + x] >= paperThreshold {
+                paper += 1
+            }
+            return CGFloat(paper) / CGFloat(end - start)
+        }
+
+        func trimFromStart(
+            limit: Int,
+            fraction: (Int) -> CGFloat
+        ) -> Int {
+            guard fraction(0) < 0.72 else { return 0 }
+            guard limit > 0 else { return 0 }
+
+            for index in 1...limit {
+                let current = fraction(index)
+                let next = index < limit ? fraction(index + 1) : current
+                if current >= 0.78, next >= 0.78 {
+                    return index
+                }
+            }
+            return 0
+        }
+
+        func trimFromEnd(
+            length: Int,
+            limit: Int,
+            fraction: (Int) -> CGFloat
+        ) -> Int {
+            let last = length - 1
+            guard last >= 0, fraction(last) < 0.72 else { return 0 }
+            guard limit > 0 else { return 0 }
+
+            for offset in 1...limit {
+                let index = last - offset
+                guard index >= 0 else { break }
+                let current = fraction(index)
+                let previous = index > 0 ? fraction(index - 1) : current
+                if current >= 0.78, previous >= 0.78 {
+                    return offset
+                }
+            }
+            return 0
+        }
+
+        let left = trimFromStart(limit: maxTrimX, fraction: columnPaperFraction)
+        let right = trimFromEnd(
+            length: analysisWidth,
+            limit: maxTrimX,
+            fraction: columnPaperFraction
+        )
+        let bottom = trimFromStart(limit: maxTrimY, fraction: rowPaperFraction)
+        let top = trimFromEnd(
+            length: analysisHeight,
+            limit: maxTrimY,
+            fraction: rowPaperFraction
+        )
+
+        guard left + right > 0 || top + bottom > 0 else { return image }
+
+        let xScale = CGFloat(sourceWidth) / CGFloat(analysisWidth)
+        let yScale = CGFloat(sourceHeight) / CGFloat(analysisHeight)
+        let crop = CGRect(
+            x: CGFloat(left) * xScale,
+            y: CGFloat(bottom) * yScale,
+            width: CGFloat(sourceWidth) - CGFloat(left + right) * xScale,
+            height: CGFloat(sourceHeight) - CGFloat(top + bottom) * yScale
+        ).integral
+
+        guard crop.width >= CGFloat(sourceWidth) * 0.88,
+              crop.height >= CGFloat(sourceHeight) * 0.88,
+              let cropped = cgImage.cropping(to: crop) else {
+            return image
+        }
+
+        return UIImage(cgImage: cropped, scale: image.scale, orientation: .up)
+    }
+
     static func documentSignals(
         from image: CIImage,
         quadrilateral: ScannerV2Quadrilateral
