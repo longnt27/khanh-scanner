@@ -246,6 +246,31 @@ final class ScannerV2GeometryTests: XCTestCase {
         XCTAssertEqual(tracker.sampleCount, 1)
     }
 
+    func testAutoCaptureDoesNotRearmAfterBriefDetectionFlicker() {
+        var gate = ScannerV2AutoCaptureRearmGate(requiredMissingFrames: 8)
+        gate.markCaptured()
+
+        for _ in 0..<3 {
+            gate.observeDocument(present: false)
+        }
+        gate.observeDocument(present: true)
+
+        XCTAssertFalse(gate.isArmed)
+    }
+
+    func testAutoCaptureRearmsAfterDocumentActuallyLeavesFrame() {
+        var gate = ScannerV2AutoCaptureRearmGate(requiredMissingFrames: 8)
+        gate.markCaptured()
+
+        for _ in 0..<7 {
+            gate.observeDocument(present: false)
+            XCTAssertFalse(gate.isArmed)
+        }
+
+        gate.observeDocument(present: false)
+        XCTAssertTrue(gate.isArmed)
+    }
+
     func testPageChangeDetectorBlocksDuplicateUntilDocumentMoves() {
         var detector = ScannerV2PageChangeDetector(minimumChange: 0.05)
         let page = ScannerV2Quadrilateral(
