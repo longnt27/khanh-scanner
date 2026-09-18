@@ -309,6 +309,34 @@ final class ScannerV2GeometryTests: XCTestCase {
         )
     }
 
+
+    func testDocumentSignalsIgnoreSharpBackgroundOutsidePage() throws {
+        let first = documentScene(backgroundPattern: 0)
+        let second = documentScene(backgroundPattern: 1)
+        let quadrilateral = ScannerV2Quadrilateral(
+            topLeft: CGPoint(x: 0.25, y: 0.75),
+            topRight: CGPoint(x: 0.75, y: 0.75),
+            bottomRight: CGPoint(x: 0.75, y: 0.25),
+            bottomLeft: CGPoint(x: 0.25, y: 0.25)
+        )
+
+        let firstSignals = try XCTUnwrap(
+            ScannerV2ImageProcessor.documentSignals(
+                from: try XCTUnwrap(CIImage(image: first)),
+                quadrilateral: quadrilateral
+            )
+        )
+        let secondSignals = try XCTUnwrap(
+            ScannerV2ImageProcessor.documentSignals(
+                from: try XCTUnwrap(CIImage(image: second)),
+                quadrilateral: quadrilateral
+            )
+        )
+
+        XCTAssertEqual(firstSignals.fingerprint, secondSignals.fingerprint)
+        XCTAssertEqual(firstSignals.sharpness, secondSignals.sharpness, accuracy: 0.02)
+    }
+
     private func fingerprintPage(variant: Int) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -325,6 +353,32 @@ final class ScannerV2GeometryTests: XCTestCase {
                 for column in 0..<4 {
                     context.fill(CGRect(x: 24 + column * 23, y: 18, width: 3, height: 92))
                 }
+            }
+        }
+    }
+
+
+    private func documentScene(backgroundPattern: Int) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: CGSize(width: 200, height: 200), format: format).image { context in
+            if backgroundPattern == 0 {
+                UIColor.darkGray.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 200, height: 200))
+            } else {
+                UIColor.black.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 200, height: 200))
+                UIColor.white.setFill()
+                for index in stride(from: 0, to: 200, by: 10) {
+                    context.fill(CGRect(x: index, y: 0, width: 4, height: 200))
+                }
+            }
+
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 50, y: 50, width: 100, height: 100))
+            UIColor.black.setFill()
+            for row in 0..<4 {
+                context.fill(CGRect(x: 68, y: 72 + row * 18, width: 64, height: 3))
             }
         }
     }
