@@ -67,6 +67,11 @@ final class DocumentLibrary: ObservableObject {
         try reloadThrowing()
     }
 
+    func deleteItems(sessionIDs: [UUID], folderIDs: [UUID]) throws {
+        try repository.deleteItems(sessionIDs: sessionIDs, folderIDs: folderIDs)
+        try reloadThrowing()
+    }
+
     private func reload() {
         do {
             try reloadThrowing()
