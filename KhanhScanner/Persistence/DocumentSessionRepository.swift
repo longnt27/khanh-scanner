@@ -177,14 +177,193 @@ final class DocumentSessionRepository {
         return catalog.sessions[index]
     }
 
-    func images(for session: DocumentSession) throws -> [UIImage] {
-        try session.pageIDs.map { pageID in
-            let url = pageURL(sessionID: session.id, pageID: pageID)
-            guard let data = try? Data(contentsOf: url), let image = UIImage(data: data) else {
+    func pageRecords(for sessionID: UUID) throws -> [DocumentPage] {
+        let catalog = try loadCatalog()
+        guard let session = catalog.sessions.first(where: { $0.id == sessionID }) else {
+            throw DocumentSessionRepositoryError.sessionNotFound
+        }
+
+        return try session.pageIDs.map { pageID in
+            let metadata = pageMetadataURL(sessionID: sessionID, pageID: pageID)
+            if fileManager.fileExists(atPath: metadata.path) {
+                return try decoder.decode(DocumentPage.self, from: Data(contentsOf: metadata))
+            }
+
+            let legacy = pageURL(sessionID: sessionID, pageID: pageID)
+            guard fileManager.fileExists(atPath: legacy.path) else {
                 throw DocumentSessionRepositoryError.pageAssetMissing
             }
+            return DocumentPage(
+                id: pageID,
+                cropQuadrilateral: .fullBounds,
+                rotation: .none,
+                isLegacySource: true
+            )
+        }
+    }
+
+    func sourceImage(for pageID: UUID, in sessionID: UUID) throws -> UIImage {
+        let source = sourceAssetURL(sessionID: sessionID, pageID: pageID)
+        if let data = try? Data(contentsOf: source), let image = UIImage(data: data) {
             return image
         }
+
+        let legacy = pageURL(sessionID: sessionID, pageID: pageID)
+        guard let data = try? Data(contentsOf: legacy), let image = UIImage(data: data) else {
+            throw DocumentSessionRepositoryError.pageAssetMissing
+        }
+        return image
+    }
+
+    func renderedImage(for pageID: UUID, in sessionID: UUID) throws -> UIImage {
+        let rendered = renderedAssetURL(sessionID: sessionID, pageID: pageID)
+        if let data = try? Data(contentsOf: rendered), let image = UIImage(data: data) {
+            return image
+        }
+
+        let legacy = pageURL(sessionID: sessionID, pageID: pageID)
+        guard let data = try? Data(contentsOf: legacy), let image = UIImage(data: data) else {
+            throw DocumentSessionRepositoryError.pageAssetMissing
+        }
+        return image
+    }
+
+    func pageAssets(for sessionID: UUID) throws -> [DocumentPageAssets] {
+        try pageRecords(for: sessionID).map { page in
+            DocumentPageAssets(
+                page: page,
+                sourceImage: try sourceImage(for: page.id, in: sessionID),
+                renderedImage: try renderedImage(for: page.id, in: sessionID)
+            )
+        }
+    }
+
+    @discardableResult
+    func appendPageRecords(
+        _ assets: [DocumentPageAssets],
+        to sessionID: UUID,
+        modifiedAt: Date = Date()
+    ) throws -> DocumentSession {
+        var catalog = try loadCatalog()
+        guard let index = catalog.sessions.firstIndex(where: { $0.id == sessionID }) else {
+            throw DocumentSessionRepositoryError.sessionNotFound
+        }
+        guard !assets.isEmpty else { return catalog.sessions[index] }
+
+        let existingIDs = Set(catalog.sessions[index].pageIDs)
+        guard assets.allSatisfy({ !existingIDs.contains($0.page.id) }) else {
+            throw DocumentSessionRepositoryError.imageEncodingFailed
+        }
+
+        var writtenIDs: [UUID] = []
+        do {
+            for asset in assets {
+                try writePageAssets(asset, sessionID: sessionID)
+                writtenIDs.append(asset.page.id)
+            }
+            catalog.sessions[index].pageIDs.append(contentsOf: assets.map { $0.page.id })
+            catalog.sessions[index].modifiedAt = modifiedAt
+            try saveCatalog(catalog)
+            return catalog.sessions[index]
+        } catch {
+            for pageID in writtenIDs {
+                try? fileManager.removeItem(at: pageAssetDirectory(sessionID: sessionID, pageID: pageID))
+            }
+            throw error
+        }
+    }
+
+    func updatePage(
+        _ page: DocumentPage,
+        in sessionID: UUID,
+        renderedImage: UIImage,
+        modifiedAt: Date = Date()
+    ) throws {
+        var catalog = try loadCatalog()
+        guard let sessionIndex = catalog.sessions.firstIndex(where: { $0.id == sessionID }) else {
+            throw DocumentSessionRepositoryError.sessionNotFound
+        }
+        guard catalog.sessions[sessionIndex].pageIDs.contains(page.id) else {
+            throw DocumentSessionRepositoryError.pageAssetMissing
+        }
+
+        let assetDirectory = pageAssetDirectory(sessionID: sessionID, pageID: page.id)
+        try fileManager.createDirectory(at: assetDirectory, withIntermediateDirectories: true)
+
+        let source = sourceAssetURL(sessionID: sessionID, pageID: page.id)
+        if !fileManager.fileExists(atPath: source.path) {
+            let legacySource = try sourceImage(for: page.id, in: sessionID)
+            guard let sourceData = legacySource.jpegData(compressionQuality: 0.96) else {
+                throw DocumentSessionRepositoryError.imageEncodingFailed
+            }
+            try sourceData.write(to: source, options: .atomic)
+        }
+
+        guard let renderedData = renderedImage.pngData() else {
+            throw DocumentSessionRepositoryError.imageEncodingFailed
+        }
+        try renderedData.write(
+            to: renderedAssetURL(sessionID: sessionID, pageID: page.id),
+            options: .atomic
+        )
+        try encoder.encode(page).write(
+            to: pageMetadataURL(sessionID: sessionID, pageID: page.id),
+            options: .atomic
+        )
+
+        catalog.sessions[sessionIndex].modifiedAt = modifiedAt
+        try saveCatalog(catalog)
+
+        let legacy = pageURL(sessionID: sessionID, pageID: page.id)
+        if fileManager.fileExists(atPath: legacy.path) {
+            try? fileManager.removeItem(at: legacy)
+        }
+    }
+
+    func deletePage(
+        id pageID: UUID,
+        from sessionID: UUID,
+        modifiedAt: Date = Date()
+    ) throws {
+        var catalog = try loadCatalog()
+        guard let index = catalog.sessions.firstIndex(where: { $0.id == sessionID }) else {
+            throw DocumentSessionRepositoryError.sessionNotFound
+        }
+        guard catalog.sessions[index].pageIDs.contains(pageID) else {
+            throw DocumentSessionRepositoryError.pageAssetMissing
+        }
+
+        catalog.sessions[index].pageIDs.removeAll { $0 == pageID }
+        catalog.sessions[index].modifiedAt = modifiedAt
+        try saveCatalog(catalog)
+
+        try? fileManager.removeItem(at: pageAssetDirectory(sessionID: sessionID, pageID: pageID))
+        try? fileManager.removeItem(at: pageURL(sessionID: sessionID, pageID: pageID))
+    }
+
+    func reorderPages(
+        _ orderedPageIDs: [UUID],
+        in sessionID: UUID,
+        modifiedAt: Date = Date()
+    ) throws {
+        var catalog = try loadCatalog()
+        guard let index = catalog.sessions.firstIndex(where: { $0.id == sessionID }) else {
+            throw DocumentSessionRepositoryError.sessionNotFound
+        }
+
+        let existing = catalog.sessions[index].pageIDs
+        guard orderedPageIDs.count == existing.count,
+              Set(orderedPageIDs) == Set(existing) else {
+            throw DocumentSessionRepositoryError.pageAssetMissing
+        }
+
+        catalog.sessions[index].pageIDs = orderedPageIDs
+        catalog.sessions[index].modifiedAt = modifiedAt
+        try saveCatalog(catalog)
+    }
+
+    func images(for session: DocumentSession) throws -> [UIImage] {
+        try session.pageIDs.map { try renderedImage(for: $0, in: session.id) }
     }
 
     @discardableResult
@@ -345,6 +524,54 @@ final class DocumentSessionRepository {
 
     private func pageURL(sessionID: UUID, pageID: UUID) -> URL {
         pageDirectory(for: sessionID).appendingPathComponent("\(pageID.uuidString).png")
+    }
+
+    private func pageAssetDirectory(sessionID: UUID, pageID: UUID) -> URL {
+        pageDirectory(for: sessionID)
+            .appendingPathComponent(pageID.uuidString, isDirectory: true)
+    }
+
+    private func sourceAssetURL(sessionID: UUID, pageID: UUID) -> URL {
+        pageAssetDirectory(sessionID: sessionID, pageID: pageID)
+            .appendingPathComponent("source.jpg")
+    }
+
+    private func renderedAssetURL(sessionID: UUID, pageID: UUID) -> URL {
+        pageAssetDirectory(sessionID: sessionID, pageID: pageID)
+            .appendingPathComponent("rendered.png")
+    }
+
+    private func pageMetadataURL(sessionID: UUID, pageID: UUID) -> URL {
+        pageAssetDirectory(sessionID: sessionID, pageID: pageID)
+            .appendingPathComponent("metadata.json")
+    }
+
+    private func writePageAssets(_ assets: DocumentPageAssets, sessionID: UUID) throws {
+        let directory = pageAssetDirectory(sessionID: sessionID, pageID: assets.page.id)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        guard let sourceData = assets.sourceImage.jpegData(compressionQuality: 0.96),
+              let renderedData = assets.renderedImage.pngData() else {
+            throw DocumentSessionRepositoryError.imageEncodingFailed
+        }
+
+        do {
+            try sourceData.write(
+                to: sourceAssetURL(sessionID: sessionID, pageID: assets.page.id),
+                options: .atomic
+            )
+            try renderedData.write(
+                to: renderedAssetURL(sessionID: sessionID, pageID: assets.page.id),
+                options: .atomic
+            )
+            try encoder.encode(assets.page).write(
+                to: pageMetadataURL(sessionID: sessionID, pageID: assets.page.id),
+                options: .atomic
+            )
+        } catch {
+            try? fileManager.removeItem(at: directory)
+            throw error
+        }
     }
 
     private func loadCatalog() throws -> Catalog {
