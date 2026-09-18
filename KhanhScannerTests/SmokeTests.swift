@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import KhanhScanner
 
 final class SmokeTests: XCTestCase {
@@ -15,5 +16,13 @@ final class SmokeTests: XCTestCase {
                 error: NSError(domain: "Share", code: 1)
             )
         )
+    }
+
+    func testScannerPresentationCannotBeDismissedInteractively() {
+        let controller = UIViewController()
+
+        ScanDismissalPolicy.protect(controller)
+
+        XCTAssertTrue(controller.isModalInPresentation)
     }
 }
