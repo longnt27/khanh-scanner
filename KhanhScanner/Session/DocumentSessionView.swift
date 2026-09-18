@@ -28,8 +28,8 @@ struct DocumentSessionView: View {
                     ScanPreviewView(
                         pages: pages,
                         onExport: exportPDF,
-                        onRescan: session.lifecycle == .active ? onScan : resumeScan,
-                        rescanTitle: session.lifecycle == .active ? "Add Pages" : "Resume Scan"
+                        onRescan: onScan,
+                        rescanTitle: "Add Pages"
                     )
                 }
             } else {
@@ -39,31 +39,14 @@ struct DocumentSessionView: View {
         .navigationTitle(session.map(title) ?? "Document")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
-            if let session {
-                VStack(spacing: 10) {
-                    if pages.isEmpty {
-                        Button(action: session.lifecycle == .active ? onScan : resumeScan) {
-                            Label(
-                                session.lifecycle == .active ? "Scan Pages" : "Resume Scan",
-                                systemImage: "camera.viewfinder"
-                            )
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-
-                    if session.lifecycle == .active {
-                        Button(action: finishSession) {
-                            Label("Done", systemImage: "checkmark.circle.fill")
-                                .font(.headline)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.green)
-                    }
+            if session != nil, pages.isEmpty {
+                Button(action: onScan) {
+                    Label("Scan Pages", systemImage: "camera.viewfinder")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
                 }
+                .buttonStyle(.borderedProminent)
                 .padding(.horizontal)
                 .padding(.top, 8)
                 .background(.bar)
@@ -137,24 +120,6 @@ struct DocumentSessionView: View {
         guard completed else { return }
         DispatchQueue.main.async {
             showingExportConfirmation = true
-        }
-    }
-
-    private func finishSession() {
-        do {
-            try library.setLifecycle(.archived, for: sessionID)
-            dismiss()
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    private func resumeScan() {
-        do {
-            try library.setLifecycle(.active, for: sessionID)
-            onScan()
-        } catch {
-            errorMessage = error.localizedDescription
         }
     }
 

@@ -24,7 +24,6 @@ final class DocumentSessionRepositoryTests: XCTestCase {
         XCTAssertEqual(reloaded, [session])
         XCTAssertEqual(session.createdAt, createdAt)
         XCTAssertEqual(session.modifiedAt, createdAt)
-        XCTAssertEqual(session.lifecycle, .active)
         XCTAssertTrue(session.pageIDs.isEmpty)
     }
 
@@ -57,21 +56,41 @@ final class DocumentSessionRepositoryTests: XCTestCase {
         XCTAssertThrowsError(try repository.images(for: sessionWithPage))
     }
 
-    func testLifecycleCanBeArchivedAndResumedWithoutChangingPages() throws {
+    func testPersistedSessionNoLongerStoresLifecycleState() throws {
         let repository = DocumentSessionRepository(rootURL: rootURL)
-        let session = try repository.createSession()
-        let withPage = try repository.appendPages([image(color: .purple)], to: session.id)
+        _ = try repository.createSession()
 
-        let archived = try repository.setLifecycle(.archived, for: session.id)
-        let resumed = try repository.setLifecycle(.active, for: session.id)
-        let appended = try repository.appendPages([image(color: .orange)], to: session.id)
-        let reloaded = try XCTUnwrap(try DocumentSessionRepository(rootURL: rootURL).session(id: session.id))
+        let catalogURL = rootURL.appendingPathComponent("sessions.json")
+        let json = try XCTUnwrap(String(data: Data(contentsOf: catalogURL), encoding: .utf8))
 
-        XCTAssertEqual(archived.lifecycle, .archived)
-        XCTAssertEqual(resumed.lifecycle, .active)
-        XCTAssertEqual(reloaded.lifecycle, .active)
-        XCTAssertEqual(Array(appended.pageIDs.prefix(withPage.pageIDs.count)), withPage.pageIDs)
-        XCTAssertEqual(reloaded.pageIDs, appended.pageIDs)
+        XCTAssertFalse(json.contains("\"lifecycle\""))
+    }
+
+    func testLegacyCatalogWithLifecycleStillLoads() throws {
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+
+        let id = UUID()
+        let createdAt = "2026-09-18T12:00:00Z"
+        let legacy = """
+        {
+          "version": 2,
+          "sessions": [{
+            "id": "\(id.uuidString)",
+            "createdAt": "\(createdAt)",
+            "modifiedAt": "\(createdAt)",
+            "pageIDs": [],
+            "lifecycle": "archived"
+          }],
+          "folders": []
+        }
+        """
+        try Data(legacy.utf8).write(to: rootURL.appendingPathComponent("sessions.json"))
+
+        let sessions = try DocumentSessionRepository(rootURL: rootURL).sessions()
+
+        XCTAssertEqual(sessions.count, 1)
+        XCTAssertEqual(sessions[0].id, id)
+        XCTAssertTrue(sessions[0].pageIDs.isEmpty)
     }
 
     func testNestedFoldersPersistWithoutDepthLimitInTheModel() throws {
