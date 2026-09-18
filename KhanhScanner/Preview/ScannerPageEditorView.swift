@@ -72,7 +72,6 @@ struct ScannerPageEditorState {
 }
 
 struct ScannerPageEditorView: View {
-    @Environment(\.dismiss) private var dismiss
     @State private var state: ScannerPageEditorState
     @State private var selectedPageID: UUID?
     @State private var croppingPageID: UUID?
@@ -123,13 +122,11 @@ struct ScannerPageEditorView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Camera") {
                         onCancel()
-                        dismiss()
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         onSave(state.pages)
-                        dismiss()
                     }
                 }
             }
