@@ -2,6 +2,11 @@ import CoreImage
 import ImageIO
 import UIKit
 
+struct ScannerV2DocumentSignals: Equatable {
+    let sharpness: Float
+    let fingerprint: ScannerV2PageFingerprint
+}
+
 struct ScannerV2PageFingerprint: Equatable {
     let bits: [UInt8]
 
@@ -100,6 +105,30 @@ enum ScannerV2ImageProcessor {
         let mean = pixels.reduce(0) { $0 + Int($1) } / pixels.count
         let bits = pixels.map { $0 < UInt8(mean) ? UInt8(1) : UInt8(0) }
         return ScannerV2PageFingerprint(bits: bits)
+    }
+
+    static func documentSignals(
+        from image: CIImage,
+        quadrilateral: ScannerV2Quadrilateral
+    ) -> ScannerV2DocumentSignals? {
+        guard let corrected = correctedImage(from: image, quadrilateral: quadrilateral),
+              let fingerprint = pageFingerprint(of: corrected) else {
+            return nil
+        }
+
+        return ScannerV2DocumentSignals(
+            sharpness: sharpnessScore(of: corrected),
+            fingerprint: fingerprint
+        )
+    }
+
+    static func documentSignals(
+        from pixelBuffer: CVPixelBuffer,
+        quadrilateral: ScannerV2Quadrilateral,
+        orientation: CGImagePropertyOrientation = .right
+    ) -> ScannerV2DocumentSignals? {
+        let image = CIImage(cvPixelBuffer: pixelBuffer).oriented(orientation)
+        return documentSignals(from: image, quadrilateral: quadrilateral)
     }
 
     static func correctedImage(
