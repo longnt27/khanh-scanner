@@ -3,7 +3,7 @@ import VisionKit
 
 struct ContentView: View {
     @StateObject private var library = DocumentLibrary()
-    @State private var path: [UUID] = []
+    @State private var path: [LibraryRoute] = []
     @State private var scanningSessionID: UUID?
     @State private var showingScanner = false
     @State private var errorMessage: String?
@@ -11,51 +11,25 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            List {
-                if library.sessions.isEmpty {
-                    ContentUnavailableView(
-                        "No Documents",
-                        systemImage: "doc.viewfinder",
-                        description: Text("Start a scan. It will be saved before the camera opens.")
+            LibraryBrowserView(
+                library: library,
+                currentFolderID: nil,
+                canScan: !isProcessing && VNDocumentCameraViewController.isSupported,
+                onNewDocument: newDocument
+            )
+            .navigationDestination(for: LibraryRoute.self) { route in
+                switch route {
+                case let .session(sessionID):
+                    DocumentSessionView(library: library, sessionID: sessionID) {
+                        beginScanning(sessionID: sessionID)
+                    }
+                case let .folder(folderID):
+                    LibraryBrowserView(
+                        library: library,
+                        currentFolderID: folderID,
+                        canScan: !isProcessing && VNDocumentCameraViewController.isSupported,
+                        onNewDocument: newDocument
                     )
-                    .listRowBackground(Color.clear)
-                } else {
-                    ForEach(library.sessions) { session in
-                        NavigationLink(value: session.id) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(session.createdAt.formatted(date: .abbreviated, time: .shortened))
-                                    .font(.headline)
-                                Text(
-                                    "\(session.pageIDs.count) page\(session.pageIDs.count == 1 ? "" : "s") · "
-                                    + (session.lifecycle == .active ? "In Progress" : "Finished")
-                                )
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Khanh Scanner")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: newDocument) {
-                        Label("New Document Scan", systemImage: "plus")
-                    }
-                    .disabled(isProcessing || !VNDocumentCameraViewController.isSupported)
-                }
-            }
-            .safeAreaInset(edge: .bottom) {
-                if library.sessions.isEmpty {
-                    Button(action: newDocument) {
-                        Label("New Document Scan", systemImage: "camera.viewfinder")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .padding()
-                    .disabled(isProcessing || !VNDocumentCameraViewController.isSupported)
                 }
             }
             .overlay {
@@ -63,11 +37,6 @@ struct ContentView: View {
                     ProgressView("Saving pages…")
                         .padding()
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-                }
-            }
-            .navigationDestination(for: UUID.self) { sessionID in
-                DocumentSessionView(library: library, sessionID: sessionID) {
-                    beginScanning(sessionID: sessionID)
                 }
             }
         }
@@ -89,10 +58,10 @@ struct ContentView: View {
         }
     }
 
-    private func newDocument() {
+    private func newDocument(in folderID: UUID?) {
         do {
-            let session = try library.createSession()
-            path.append(session.id)
+            let session = try library.createSession(in: folderID)
+            path.append(.session(session.id))
             beginScanning(sessionID: session.id)
         } catch {
             errorMessage = "Could not create document: \(error.localizedDescription)"

@@ -74,6 +74,72 @@ final class DocumentSessionRepositoryTests: XCTestCase {
         XCTAssertEqual(reloaded.pageIDs, appended.pageIDs)
     }
 
+    func testNestedFoldersPersistWithoutDepthLimitInTheModel() throws {
+        let repository = DocumentSessionRepository(rootURL: rootURL)
+        let project = try repository.createFolder(name: "Project A")
+        let receipts = try repository.createFolder(name: "Receipts", parentFolderID: project.id)
+        let year = try repository.createFolder(name: "2027", parentFolderID: receipts.id)
+
+        let reloaded = try DocumentSessionRepository(rootURL: rootURL).folders()
+
+        XCTAssertEqual(reloaded.first(where: { $0.id == project.id })?.parentFolderID, nil)
+        XCTAssertEqual(reloaded.first(where: { $0.id == receipts.id })?.parentFolderID, project.id)
+        XCTAssertEqual(reloaded.first(where: { $0.id == year.id })?.parentFolderID, receipts.id)
+    }
+
+    func testCreateFolderMovesSelectedSessionsWithoutChangingPages() throws {
+        let repository = DocumentSessionRepository(rootURL: rootURL)
+        let session = try repository.createSession()
+        let withPage = try repository.appendPages([image(color: .cyan)], to: session.id)
+
+        let folder = try repository.createFolder(name: "Client", sessionIDs: [session.id])
+        let moved = try XCTUnwrap(try repository.session(id: session.id))
+
+        XCTAssertEqual(moved.folderID, folder.id)
+        XCTAssertEqual(moved.pageIDs, withPage.pageIDs)
+        XCTAssertEqual(try repository.images(for: moved).count, 1)
+    }
+
+    func testSessionCanMoveBetweenExistingFoldersAndBackToRoot() throws {
+        let repository = DocumentSessionRepository(rootURL: rootURL)
+        let session = try repository.createSession()
+        let first = try repository.createFolder(name: "First", sessionIDs: [session.id])
+        let second = try repository.createFolder(name: "Second")
+
+        try repository.move(sessionIDs: [session.id], to: second.id)
+        XCTAssertEqual(try repository.session(id: session.id)?.folderID, second.id)
+
+        try repository.move(sessionIDs: [session.id], to: nil)
+        XCTAssertNil(try repository.session(id: session.id)?.folderID)
+        XCTAssertNotNil(try repository.folders().first(where: { $0.id == first.id }))
+    }
+
+    func testFolderMoveRejectsSelfAndDescendantDestinations() throws {
+        let repository = DocumentSessionRepository(rootURL: rootURL)
+        let parent = try repository.createFolder(name: "Parent")
+        let child = try repository.createFolder(name: "Child", parentFolderID: parent.id)
+        let grandchild = try repository.createFolder(name: "Grandchild", parentFolderID: child.id)
+
+        XCTAssertThrowsError(try repository.move(folderIDs: [parent.id], to: parent.id))
+        XCTAssertThrowsError(try repository.move(folderIDs: [parent.id], to: grandchild.id))
+
+        try repository.move(folderIDs: [grandchild.id], to: nil)
+        XCTAssertNil(try repository.folders().first(where: { $0.id == grandchild.id })?.parentFolderID)
+    }
+
+    func testDeletingNonEmptyFolderNeverDeletesItsSessionsOrPages() throws {
+        let repository = DocumentSessionRepository(rootURL: rootURL)
+        let session = try repository.createSession()
+        try repository.appendPages([image(color: .brown)], to: session.id)
+        let folder = try repository.createFolder(name: "Keep", sessionIDs: [session.id])
+
+        XCTAssertThrowsError(try repository.deleteFolder(id: folder.id))
+
+        let reloaded = try XCTUnwrap(try repository.session(id: session.id))
+        XCTAssertEqual(reloaded.folderID, folder.id)
+        XCTAssertEqual(try repository.images(for: reloaded).count, 1)
+    }
+
     private func image(color: UIColor, size: CGSize = CGSize(width: 4, height: 4)) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
