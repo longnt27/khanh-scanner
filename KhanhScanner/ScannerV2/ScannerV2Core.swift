@@ -71,6 +71,25 @@ enum ScannerV2PlaneGeometry {
         ]
     }
 
+    static func regularizedWorldRectangle(
+        _ worldPoints: [SIMD3<Float>],
+        planeTransform: simd_float4x4
+    ) -> [SIMD3<Float>]? {
+        guard worldPoints.count == 4 else { return nil }
+
+        let inverse = simd_inverse(planeTransform)
+        let localPoints = worldPoints.map { point -> SIMD2<Float> in
+            let local = inverse * SIMD4<Float>(point.x, point.y, point.z, 1)
+            return SIMD2<Float>(local.x, local.z)
+        }
+        guard let fitted = fittedRectangle(localPoints) else { return nil }
+
+        return fitted.map { point -> SIMD3<Float> in
+            let world = planeTransform * SIMD4<Float>(point.x, 0, point.y, 1)
+            return SIMD3<Float>(world.x, world.y, world.z)
+        }
+    }
+
     static func rectangleScore(_ points: [SIMD2<Float>]) -> Float {
         guard points.count == 4 else { return 0 }
 
