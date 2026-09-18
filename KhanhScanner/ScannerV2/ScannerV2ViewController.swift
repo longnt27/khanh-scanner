@@ -49,6 +49,7 @@ final class ScannerV2ViewController: UIViewController {
     private var configuration: ARWorldTrackingConfiguration?
     private var pages: [UIImage] = []
     private var latestQuadrilateral: ScannerV2Quadrilateral?
+    private var latestFingerprint: ScannerV2PageFingerprint?
     private var latestReadiness: ScannerV2CaptureReadiness = .noDocument
     private var stabilityTracker = ScannerV2StabilityTracker()
     private var cameraMotionTracker = ScannerV2CameraMotionTracker()
@@ -191,7 +192,7 @@ final class ScannerV2ViewController: UIViewController {
             updateStatus(.noDocument)
             return
         }
-        capturePage(using: quadrilateral)
+        capturePage(using: quadrilateral, fingerprint: latestFingerprint)
     }
 
     @objc private func finishScanning() {
@@ -240,14 +241,19 @@ final class ScannerV2ViewController: UIViewController {
                     bottomLeft: observation.bottomLeft
                 )
 
-                let sharpness = ScannerV2ImageProcessor.cgImage(
+                let analyzedImage = ScannerV2ImageProcessor.cgImage(
                     from: pixelBuffer,
                     orientation: .right
-                ).map(ScannerV2ImageProcessor.sharpnessScore(of:)) ?? 0
+                )
+                let sharpness = analyzedImage.map(ScannerV2ImageProcessor.sharpnessScore(of:)) ?? 0
+                let fingerprint = analyzedImage.flatMap {
+                    ScannerV2ImageProcessor.pageFingerprint(of: UIImage(cgImage: $0))
+                }
 
                 DispatchQueue.main.async { [weak self] in
                     self?.handle(
                         quadrilateral: quadrilateral,
+                        fingerprint: fingerprint,
                         sharpness: sharpness,
                         frame: frame,
                         cameraStable: cameraStable
@@ -263,12 +269,14 @@ final class ScannerV2ViewController: UIViewController {
 
     private func handle(
         quadrilateral: ScannerV2Quadrilateral,
+        fingerprint: ScannerV2PageFingerprint?,
         sharpness: Float,
         frame: ARFrame,
         cameraStable: Bool
     ) {
         missingDocumentFrames = 0
         latestQuadrilateral = quadrilateral
+        latestFingerprint = fingerprint
 
         let documentStable = stabilityTracker.append(quadrilateral)
         let planeValidation = planeValidation(for: quadrilateral, frame: frame)
@@ -292,13 +300,14 @@ final class ScannerV2ViewController: UIViewController {
         if readiness == .ready,
            !isCapturing,
            now - lastCaptureTimestamp > 1.0,
-           pageChangeDetector.canCapture(quadrilateral) {
-            capturePage(using: quadrilateral)
+           pageChangeDetector.canCapture(quadrilateral, fingerprint: fingerprint) {
+            capturePage(using: quadrilateral, fingerprint: fingerprint)
         }
     }
 
     private func handleMissingDocument() {
         latestQuadrilateral = nil
+        latestFingerprint = nil
         latestReadiness = .noDocument
         stabilityTracker.reset()
         missingDocumentFrames += 1
@@ -309,7 +318,10 @@ final class ScannerV2ViewController: UIViewController {
         updateStatus(.noDocument)
     }
 
-    private func capturePage(using liveQuadrilateral: ScannerV2Quadrilateral) {
+    private func capturePage(
+        using liveQuadrilateral: ScannerV2Quadrilateral,
+        fingerprint: ScannerV2PageFingerprint?
+    ) {
         guard !isCapturing else { return }
         isCapturing = true
         shutterButton.isEnabled = false
@@ -378,7 +390,10 @@ final class ScannerV2ViewController: UIViewController {
 
                     DispatchQueue.main.async {
                         self.pages.append(corrected)
-                        self.pageChangeDetector.markCaptured(liveQuadrilateral)
+                        self.pageChangeDetector.markCaptured(
+                            liveQuadrilateral,
+                            fingerprint: fingerprint
+                        )
                         self.lastCaptureTimestamp = CACurrentMediaTime()
                         self.isCapturing = false
                         self.stabilityTracker.reset()
