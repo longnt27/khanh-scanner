@@ -22,6 +22,7 @@ final class DocumentEnhancerTests: XCTestCase {
             )
         )
 
+        print("WHITE_BALANCE_DIAG warm=\(warm) cool=\(cool) warmSpread=\(channelSpread(warm)) coolSpread=\(channelSpread(cool)) warmLuma=\(luminance(warm)) coolLuma=\(luminance(cool))")
         XCTAssertLessThan(channelSpread(warm), 0.08, "warm=\(warm)")
         XCTAssertLessThan(channelSpread(cool), 0.08, "cool=\(cool)")
         XCTAssertGreaterThan(luminance(warm), 0.88, "warm=\(warm)")
