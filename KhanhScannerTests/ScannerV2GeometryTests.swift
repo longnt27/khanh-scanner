@@ -64,6 +64,59 @@ final class ScannerV2GeometryTests: XCTestCase {
         XCTAssertGreaterThan(cropped.size.height, image.size.height * 0.70)
     }
 
+    func testCropValidationRejectsSelfIntersectingQuadrilateral() {
+        let bowTie = ScannerV2Quadrilateral(
+            topLeft: CGPoint(x: 0.1, y: 0.9),
+            topRight: CGPoint(x: 0.9, y: 0.1),
+            bottomRight: CGPoint(x: 0.9, y: 0.9),
+            bottomLeft: CGPoint(x: 0.1, y: 0.1)
+        )
+
+        XCTAssertFalse(bowTie.isValidCrop)
+        XCTAssertTrue(ScannerV2Quadrilateral.fullBounds.isValidCrop)
+    }
+
+    func testDocumentPageRendererAppliesCropThenRotation() throws {
+        let source = solidImage(size: CGSize(width: 200, height: 300))
+        let page = DocumentPage(
+            cropQuadrilateral: ScannerV2Quadrilateral(
+                topLeft: CGPoint(x: 0.15, y: 0.90),
+                topRight: CGPoint(x: 0.85, y: 0.90),
+                bottomRight: CGPoint(x: 0.85, y: 0.10),
+                bottomLeft: CGPoint(x: 0.15, y: 0.10)
+            ),
+            rotation: .clockwise90,
+            isLegacySource: false
+        )
+
+        let rendered = try DocumentPageRenderer.render(
+            source: source,
+            page: page,
+            enhance: false
+        )
+
+        XCTAssertGreaterThan(rendered.size.width, rendered.size.height)
+        XCTAssertLessThan(rendered.size.height, source.size.width)
+    }
+
+    func testFullBoundsLegacyRenderPreservesImageDimensions() throws {
+        let source = solidImage(size: CGSize(width: 120, height: 180))
+        let page = DocumentPage(
+            cropQuadrilateral: .fullBounds,
+            rotation: .none,
+            isLegacySource: true
+        )
+
+        let rendered = try DocumentPageRenderer.render(
+            source: source,
+            page: page,
+            enhance: false
+        )
+
+        XCTAssertEqual(rendered.size.width, source.size.width, accuracy: 1)
+        XCTAssertEqual(rendered.size.height, source.size.height, accuracy: 1)
+    }
+
     func testRayPlaneIntersectionFindsExpectedPoint() throws {
         let planePoint = SIMD3<Float>(0, 0, 0)
         let planeNormal = SIMD3<Float>(0, 1, 0)
