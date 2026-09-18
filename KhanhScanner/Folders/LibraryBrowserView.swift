@@ -36,6 +36,9 @@ struct LibraryBrowserView: View {
     @State private var showingNewFolder = false
     @State private var showingMovePicker = false
     @State private var showingDeleteConfirmation = false
+    @State private var showingRenameDocument = false
+    @State private var renamingSessionID: UUID?
+    @State private var renameDocumentText = ""
     @State private var errorMessage: String?
 
     private var childFolders: [DocumentFolder] {
@@ -89,7 +92,7 @@ struct LibraryBrowserView: View {
                     ForEach(childSessions) { session in
                         NavigationLink(value: LibraryRoute.session(session.id)) {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(session.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                Text(session.name)
                                     .font(.headline)
                                 Text("\(session.pageIDs.count) page\(session.pageIDs.count == 1 ? "" : "s")")
                                     .font(.subheadline)
@@ -103,6 +106,14 @@ struct LibraryBrowserView: View {
                                     selectionState.beginSelecting(.session(session.id))
                                 }
                         )
+                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                            Button {
+                                beginRenaming(session)
+                            } label: {
+                                Label("Rename", systemImage: "pencil")
+                            }
+                            .tint(.blue)
+                        }
                     }
                 }
             }
@@ -179,6 +190,11 @@ struct LibraryBrowserView: View {
         } message: {
             Text(selectionState.selection.isEmpty ? "Create it here." : "Move the selected items into it.")
         }
+        .alert("Rename Document", isPresented: $showingRenameDocument) {
+            TextField("Document name", text: $renameDocumentText)
+            Button("Save", action: renameDocument)
+            Button("Cancel", role: .cancel) {}
+        }
         .sheet(isPresented: $showingMovePicker) {
             FolderDestinationPicker(
                 folders: library.folders,
@@ -251,6 +267,22 @@ struct LibraryBrowserView: View {
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
         )
+    }
+
+    private func beginRenaming(_ session: DocumentSession) {
+        renamingSessionID = session.id
+        renameDocumentText = session.name
+        showingRenameDocument = true
+    }
+
+    private func renameDocument() {
+        guard let renamingSessionID else { return }
+        do {
+            try library.renameSession(id: renamingSessionID, to: renameDocumentText)
+            self.renamingSessionID = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func createFolder() {

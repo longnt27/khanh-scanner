@@ -90,7 +90,39 @@ final class DocumentSessionRepositoryTests: XCTestCase {
 
         XCTAssertEqual(sessions.count, 1)
         XCTAssertEqual(sessions[0].id, id)
+        XCTAssertFalse(sessions[0].name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         XCTAssertTrue(sessions[0].pageIDs.isEmpty)
+    }
+
+    func testRenameSessionTrimsAndPersistsName() throws {
+        let repository = DocumentSessionRepository(rootURL: rootURL)
+        let session = try repository.createSession()
+
+        let renamed = try repository.renameSession(
+            id: session.id,
+            to: "  Client Contract  ",
+            modifiedAt: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+        let reloaded = try XCTUnwrap(
+            try DocumentSessionRepository(rootURL: rootURL).session(id: session.id)
+        )
+
+        XCTAssertEqual(renamed.name, "Client Contract")
+        XCTAssertEqual(reloaded.name, "Client Contract")
+        XCTAssertEqual(reloaded.modifiedAt, Date(timeIntervalSince1970: 1_800_000_000))
+    }
+
+    func testRenameSessionRejectsBlankNameWithoutChangingExistingName() throws {
+        let repository = DocumentSessionRepository(rootURL: rootURL)
+        let session = try repository.createSession()
+        _ = try repository.renameSession(id: session.id, to: "Invoice")
+
+        XCTAssertThrowsError(try repository.renameSession(id: session.id, to: "   \n  "))
+
+        XCTAssertEqual(
+            try XCTUnwrap(repository.session(id: session.id)).name,
+            "Invoice"
+        )
     }
 
     func testNestedFoldersPersistWithoutDepthLimitInTheModel() throws {

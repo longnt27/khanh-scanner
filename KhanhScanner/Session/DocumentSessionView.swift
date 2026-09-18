@@ -11,6 +11,8 @@ struct DocumentSessionView: View {
     @State private var showingShare = false
     @State private var showingExportConfirmation = false
     @State private var showingDeleteConfirmation = false
+    @State private var showingRenameDocument = false
+    @State private var renameDocumentText = ""
     @State private var errorMessage: String?
 
     private var session: DocumentSession? { library.session(id: sessionID) }
@@ -36,7 +38,7 @@ struct DocumentSessionView: View {
                 ContentUnavailableView("Document Not Found", systemImage: "exclamationmark.triangle")
             }
         }
-        .navigationTitle(session.map(title) ?? "Document")
+        .navigationTitle(session?.name ?? "Document")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             if session != nil, pages.isEmpty {
@@ -53,7 +55,15 @@ struct DocumentSessionView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    beginRenaming()
+                } label: {
+                    Image(systemName: "pencil")
+                }
+                .accessibilityLabel("Rename document")
+                .disabled(session == nil)
+
                 Button(role: .destructive) { showingDeleteConfirmation = true } label: {
                     Image(systemName: "trash")
                 }
@@ -73,6 +83,11 @@ struct DocumentSessionView: View {
             titleVisibility: .visible
         ) {
             Button("Delete Document", role: .destructive, action: deleteSession)
+            Button("Cancel", role: .cancel) {}
+        }
+        .alert("Rename Document", isPresented: $showingRenameDocument) {
+            TextField("Document name", text: $renameDocumentText)
+            Button("Save", action: renameDocument)
             Button("Cancel", role: .cancel) {}
         }
         .alert("Khanh Scanner", isPresented: errorBinding) {
@@ -103,8 +118,12 @@ struct DocumentSessionView: View {
     }
 
     private func exportPDF() {
+        guard let session else { return }
         do {
-            shareURL = try PDFFileWriter.write(PDFExporter.makePDF(from: pages))
+            shareURL = try PDFFileWriter.write(
+                PDFExporter.makePDF(from: pages),
+                suggestedName: session.name
+            )
             showingShare = true
         } catch {
             errorMessage = "Could not create PDF: \(error.localizedDescription)"
@@ -114,12 +133,26 @@ struct DocumentSessionView: View {
     private func handleExportCompletion(_ completed: Bool) {
         showingShare = false
         if let shareURL {
-            try? FileManager.default.removeItem(at: shareURL)
+            try? FileManager.default.removeItem(at: shareURL.deletingLastPathComponent())
             self.shareURL = nil
         }
         guard completed else { return }
         DispatchQueue.main.async {
             showingExportConfirmation = true
+        }
+    }
+
+    private func beginRenaming() {
+        guard let session else { return }
+        renameDocumentText = session.name
+        showingRenameDocument = true
+    }
+
+    private func renameDocument() {
+        do {
+            try library.renameSession(id: sessionID, to: renameDocumentText)
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -132,7 +165,4 @@ struct DocumentSessionView: View {
         }
     }
 
-    private func title(for session: DocumentSession) -> String {
-        session.createdAt.formatted(date: .abbreviated, time: .shortened)
-    }
 }
