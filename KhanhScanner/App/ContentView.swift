@@ -1,4 +1,5 @@
 import SwiftUI
+import VisionKit
 
 struct ContentView: View {
     @StateObject private var library = DocumentLibrary()
@@ -6,6 +7,7 @@ struct ContentView: View {
     @State private var scanningSessionID: UUID?
     @State private var showingScanner = false
     @State private var errorMessage: String?
+    @State private var rejectedPageCount: Int?
     @State private var isProcessing = false
 
     var body: some View {
@@ -13,7 +15,7 @@ struct ContentView: View {
             LibraryBrowserView(
                 library: library,
                 currentFolderID: nil,
-                canScan: !isProcessing && DocumentCameraViewController.isSupported,
+                canScan: !isProcessing && VNDocumentCameraViewController.isSupported,
                 onNewDocument: newDocument
             )
             .navigationDestination(for: LibraryRoute.self) { route in
@@ -26,7 +28,7 @@ struct ContentView: View {
                     LibraryBrowserView(
                         library: library,
                         currentFolderID: folderID,
-                        canScan: !isProcessing && DocumentCameraViewController.isSupported,
+                        canScan: !isProcessing && VNDocumentCameraViewController.isSupported,
                         onNewDocument: newDocument
                     )
                 }
@@ -43,6 +45,9 @@ struct ContentView: View {
             DocumentScannerView(onScan: { captured in
                 showingScanner = false
                 process(captured, for: scanningSessionID)
+            }, onRejected: { count in
+                showingScanner = false
+                rejectedPageCount = count
             }, onFailure: { error in
                 showingScanner = false
                 errorMessage = error.localizedDescription
@@ -55,6 +60,22 @@ struct ContentView: View {
             Button("OK", role: .cancel) { errorMessage = nil }
         } message: {
             Text(errorMessage ?? "Unknown error")
+        }
+        .alert("Page Not Saved", isPresented: Binding(
+            get: { rejectedPageCount != nil },
+            set: { if !$0 { rejectedPageCount = nil } }
+        )) {
+            Button("Scan Again") {
+                rejectedPageCount = nil
+                if let scanningSessionID {
+                    beginScanning(sessionID: scanningSessionID)
+                }
+            }
+            Button("Later", role: .cancel) {
+                rejectedPageCount = nil
+            }
+        } message: {
+            Text(rejectionMessage)
         }
     }
 
@@ -71,6 +92,12 @@ struct ContentView: View {
     private func beginScanning(sessionID: UUID) {
         scanningSessionID = sessionID
         showingScanner = true
+    }
+
+    private var rejectionMessage: String {
+        let count = rejectedPageCount ?? 1
+        let pageDescription = count == 1 ? "That page was" : "Those \(count) pages were"
+        return "\(ScannedPageQualityValidator.warningMessage) \(pageDescription) not saved."
     }
 
     private func process(_ captured: [UIImage], for sessionID: UUID?) {

@@ -1,193 +1,235 @@
 import CoreGraphics
-import Foundation
-
-struct DocumentQuadrilateral: Equatable {
-    let topLeft: CGPoint
-    let topRight: CGPoint
-    let bottomRight: CGPoint
-    let bottomLeft: CGPoint
-
-    var points: [CGPoint] { [topLeft, topRight, bottomRight, bottomLeft] }
-}
-
-struct DocumentEdgeSupport: Equatable {
-    let overall: CGFloat
-    let weakestEnd: CGFloat
-}
+import UIKit
 
 enum DocumentQuality: Equatable {
     case ready
     case flattenCorners
 }
 
-enum DocumentQualityEvaluator {
-    private static let minimumConfidence: Float = 0.55
-    private static let minimumArea: CGFloat = 0.12
-    private static let minimumEdgeLength: CGFloat = 0.10
-    private static let minimumCornerAngle = 30.0
-    private static let maximumCornerAngle = 150.0
-    private static let minimumOverallEdgeSupport: CGFloat = 0.62
-    private static let minimumEdgeEndSupport: CGFloat = 0.32
-
-    static func evaluate(
-        _ quadrilateral: DocumentQuadrilateral,
-        confidence: Float,
-        edgeSupport: DocumentEdgeSupport? = nil
-    ) -> DocumentQuality {
-        guard confidence >= minimumConfidence,
-              pointsAreNormalized(quadrilateral.points),
-              polygonArea(quadrilateral.points) >= minimumArea,
-              edges(of: quadrilateral.points).allSatisfy({ length($0.0, $0.1) >= minimumEdgeLength }),
-              isConvex(quadrilateral.points),
-              cornerAngles(of: quadrilateral.points).allSatisfy({
-                  $0 >= minimumCornerAngle && $0 <= maximumCornerAngle
-              }) else {
-            return .flattenCorners
-        }
-
-        if let edgeSupport,
-           edgeSupport.overall < minimumOverallEdgeSupport
-            || edgeSupport.weakestEnd < minimumEdgeEndSupport {
-            return .flattenCorners
-        }
-
-        return .ready
-    }
-
-    private static func pointsAreNormalized(_ points: [CGPoint]) -> Bool {
-        points.allSatisfy { (0...1).contains($0.x) && (0...1).contains($0.y) }
-    }
-
-    private static func edges(of points: [CGPoint]) -> [(CGPoint, CGPoint)] {
-        points.indices.map { index in
-            (points[index], points[(index + 1) % points.count])
-        }
-    }
-
-    private static func length(_ first: CGPoint, _ second: CGPoint) -> CGFloat {
-        hypot(second.x - first.x, second.y - first.y)
-    }
-
-    private static func polygonArea(_ points: [CGPoint]) -> CGFloat {
-        let twiceArea = points.indices.reduce(CGFloat.zero) { result, index in
-            let next = points[(index + 1) % points.count]
-            return result + points[index].x * next.y - next.x * points[index].y
-        }
-        return abs(twiceArea) / 2
-    }
-
-    private static func isConvex(_ points: [CGPoint]) -> Bool {
-        let crossProducts = points.indices.map { index -> CGFloat in
-            let first = points[index]
-            let second = points[(index + 1) % points.count]
-            let third = points[(index + 2) % points.count]
-            return (second.x - first.x) * (third.y - second.y)
-                - (second.y - first.y) * (third.x - second.x)
-        }
-        guard let first = crossProducts.first, abs(first) > .ulpOfOne else { return false }
-        return crossProducts.allSatisfy { abs($0) > .ulpOfOne && ($0 > 0) == (first > 0) }
-    }
-
-    private static func cornerAngles(of points: [CGPoint]) -> [Double] {
-        points.indices.map { index in
-            let previous = points[(index - 1 + points.count) % points.count]
-            let point = points[index]
-            let next = points[(index + 1) % points.count]
-            let first = CGVector(dx: previous.x - point.x, dy: previous.y - point.y)
-            let second = CGVector(dx: next.x - point.x, dy: next.y - point.y)
-            let denominator = hypot(first.dx, first.dy) * hypot(second.dx, second.dy)
-            guard denominator > .ulpOfOne else { return 0 }
-            let cosine = max(-1, min(1, (first.dx * second.dx + first.dy * second.dy) / denominator))
-            return acos(Double(cosine)) * 180 / .pi
-        }
-    }
+struct ScannedPageValidation {
+    let acceptedPages: [UIImage]
+    let rejectedPageCount: Int
 }
 
-enum DocumentEdgeAnalyzer {
-    private static let analysisSize = 256
-    private static let samplesPerEdge = 48
-    private static let endSampleCount = 12
-    private static let normalSearchRadius = 4
-    private static let minimumContrast = 32
+enum ScannedPageQualityValidator {
+    static let warningMessage = "Flatten all four corners before scanning."
 
-    static func measure(
-        in image: CGImage,
-        quadrilateral: DocumentQuadrilateral
-    ) -> DocumentEdgeSupport {
-        guard let pixels = grayscalePixels(from: image) else {
-            return DocumentEdgeSupport(overall: 0, weakestEnd: 0)
-        }
+    static func validate(_ pages: [UIImage]) -> ScannedPageValidation {
+        validate(pages, evaluator: quality(of:))
+    }
 
-        let points = quadrilateral.points.map { point in
-            CGPoint(
-                x: point.x * CGFloat(analysisSize - 1),
-                y: point.y * CGFloat(analysisSize - 1)
-            )
-        }
-        let edges = points.indices.map { index in
-            (points[index], points[(index + 1) % points.count])
-        }
-        let supportByEdge = edges.map { edgeSupport(from: $0.0, to: $0.1, pixels: pixels) }
-        let supportedCount = supportByEdge.flatMap { $0 }.filter { $0 }.count
-        let totalCount = supportByEdge.count * samplesPerEdge
-        let endScores = supportByEdge.flatMap { support in
-            [
-                fractionSupported(Array(support.prefix(endSampleCount))),
-                fractionSupported(Array(support.suffix(endSampleCount)))
-            ]
+    static func validate(
+        _ pages: [UIImage],
+        evaluator: (UIImage) -> DocumentQuality
+    ) -> ScannedPageValidation {
+        var acceptedPages: [UIImage] = []
+        var rejectedPageCount = 0
+
+        for page in pages {
+            switch evaluator(page) {
+            case .ready:
+                acceptedPages.append(page)
+            case .flattenCorners:
+                rejectedPageCount += 1
+            }
         }
 
-        return DocumentEdgeSupport(
-            overall: totalCount == 0 ? 0 : CGFloat(supportedCount) / CGFloat(totalCount),
-            weakestEnd: endScores.min() ?? 0
+        return ScannedPageValidation(
+            acceptedPages: acceptedPages,
+            rejectedPageCount: rejectedPageCount
         )
     }
 
-    private static func grayscalePixels(from image: CGImage) -> [UInt8]? {
-        var pixels = [UInt8](repeating: 0, count: analysisSize * analysisSize)
-        let colorSpace = CGColorSpaceCreateDeviceGray()
+    static func quality(of image: UIImage) -> DocumentQuality {
+        guard let image = image.normalizedCGImage else { return .flattenCorners }
+        return DocumentCornerFoldAnalyzer.hasObviousFold(in: image) ? .flattenCorners : .ready
+    }
+}
+
+private enum DocumentCornerFoldAnalyzer {
+    private static let analysisSize = 256
+    private static let comparisonOffset = 4
+    private static let sampleCount = 18
+    private static let minimumSeparation = 42.0
+    private static let minimumSupportedFraction = 0.72
+    private static let maximumOuterDeviation = 34.0
+    private static let maximumInnerDeviation = 28.0
+
+    static func hasObviousFold(in image: CGImage) -> Bool {
+        guard let grayscaleImage = grayscaleImage(from: image) else { return false }
+
+        for corner in Corner.allCases {
+            for intercept in stride(from: 28, through: 76, by: 4) {
+                if hasFoldBoundary(at: corner, intercept: intercept, image: grayscaleImage) {
+                    return true
+                }
+            }
+        }
+
+        return false
+    }
+
+    private static func hasFoldBoundary(
+        at corner: Corner,
+        intercept: Int,
+        image: GrayscaleImage
+    ) -> Bool {
+        var signedDifferences: [Double] = []
+        var innerBoundaryValues: [Double] = []
+        var innerReferenceValues: [Double] = []
+
+        for index in 0..<sampleCount {
+            let progress = 0.25 + 0.5 * (Double(index) + 0.5) / Double(sampleCount)
+            let u = Double(intercept) * progress
+            let v = Double(intercept) - u
+            let outer = sample(
+                at: corner,
+                u: u - Double(comparisonOffset),
+                v: v - Double(comparisonOffset),
+                image: image
+            )
+            let inner = sample(
+                at: corner,
+                u: u + Double(comparisonOffset),
+                v: v + Double(comparisonOffset),
+                image: image
+            )
+            signedDifferences.append(Double(inner) - Double(outer))
+            innerBoundaryValues.append(Double(inner))
+            innerReferenceValues.append(Double(sample(
+                at: corner,
+                u: u + Double(comparisonOffset * 2),
+                v: v + Double(comparisonOffset * 2),
+                image: image
+            )))
+        }
+
+        let meanDifference = signedDifferences.reduce(0, +) / Double(signedDifferences.count)
+        let supportedSamples = signedDifferences.filter {
+            abs($0) >= minimumSeparation && ($0 > 0) == (meanDifference > 0)
+        }.count
+        let supportedFraction = Double(supportedSamples) / Double(signedDifferences.count)
+
+        guard abs(meanDifference) >= minimumSeparation,
+              supportedFraction >= minimumSupportedFraction else {
+            return false
+        }
+
+        let outerValues = outerTriangleSamples(
+            at: corner,
+            intercept: intercept - comparisonOffset * 2,
+            image: image
+        )
+        guard !outerValues.isEmpty else { return false }
+        let mean = outerValues.reduce(0, +) / Double(outerValues.count)
+        let innerMean = innerBoundaryValues.reduce(0, +) / Double(innerBoundaryValues.count)
+        let innerReferenceMean = innerReferenceValues.reduce(0, +) / Double(innerReferenceValues.count)
+        let variance = outerValues.reduce(0) { total, value in
+            total + pow(value - mean, 2)
+        } / Double(outerValues.count)
+        return abs(innerMean - mean) >= minimumSeparation
+            && abs(innerMean - innerReferenceMean) <= maximumInnerDeviation
+            && sqrt(variance) <= maximumOuterDeviation
+    }
+
+    private static func outerTriangleSamples(
+        at corner: Corner,
+        intercept: Int,
+        image: GrayscaleImage
+    ) -> [Double] {
+        guard intercept > 12 else { return [] }
+        var values: [Double] = []
+        let step = max(3, intercept / 8)
+
+        for u in stride(from: 4, to: intercept, by: step) {
+            for v in stride(from: 4, to: intercept - u, by: step) {
+                values.append(Double(sample(
+                    at: corner,
+                    u: Double(u),
+                    v: Double(v),
+                    image: image
+                )))
+            }
+        }
+
+        return values
+    }
+
+    private static func sample(
+        at corner: Corner,
+        u: Double,
+        v: Double,
+        image: GrayscaleImage
+    ) -> UInt8 {
+        let localX = min(analysisSize - 1, max(0, Int(round(u))))
+        let localY = min(analysisSize - 1, max(0, Int(round(v))))
+        let x: Int
+        let y: Int
+
+        switch corner {
+        case .topLeft:
+            x = localX
+            y = localY
+        case .topRight:
+            x = image.width - 1 - localX
+            y = localY
+        case .bottomRight:
+            x = image.width - 1 - localX
+            y = image.height - 1 - localY
+        case .bottomLeft:
+            x = localX
+            y = image.height - 1 - localY
+        }
+
+        return image.pixels[y * image.width + x]
+    }
+
+    private static func grayscaleImage(from image: CGImage) -> GrayscaleImage? {
+        let sourceWidth = max(1, image.width)
+        let sourceHeight = max(1, image.height)
+        let scale = CGFloat(analysisSize) / CGFloat(min(sourceWidth, sourceHeight))
+        let width = max(analysisSize, Int(round(CGFloat(sourceWidth) * scale)))
+        let height = max(analysisSize, Int(round(CGFloat(sourceHeight) * scale)))
+        var pixels = [UInt8](repeating: 0, count: width * height)
         let rendered = pixels.withUnsafeMutableBytes { buffer -> Bool in
             guard let context = CGContext(
                 data: buffer.baseAddress,
-                width: analysisSize,
-                height: analysisSize,
+                width: width,
+                height: height,
                 bitsPerComponent: 8,
-                bytesPerRow: analysisSize,
-                space: colorSpace,
+                bytesPerRow: width,
+                space: CGColorSpaceCreateDeviceGray(),
                 bitmapInfo: CGImageAlphaInfo.none.rawValue
             ) else { return false }
             context.interpolationQuality = .medium
-            context.draw(image, in: CGRect(x: 0, y: 0, width: analysisSize, height: analysisSize))
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
             return true
         }
-        return rendered ? pixels : nil
+        return rendered ? GrayscaleImage(pixels: pixels, width: width, height: height) : nil
     }
 
-    private static func edgeSupport(from start: CGPoint, to end: CGPoint, pixels: [UInt8]) -> [Bool] {
-        let dx = end.x - start.x
-        let dy = end.y - start.y
-        let edgeLength = hypot(dx, dy)
-        guard edgeLength > .ulpOfOne else {
-            return [Bool](repeating: false, count: samplesPerEdge)
-        }
-        let normal = CGVector(dx: -dy / edgeLength, dy: dx / edgeLength)
-
-        return (0..<samplesPerEdge).map { index in
-            let amount = (CGFloat(index) + 0.5) / CGFloat(samplesPerEdge)
-            let point = CGPoint(x: start.x + dx * amount, y: start.y + dy * amount)
-            let values = (-normalSearchRadius...normalSearchRadius).compactMap { offset -> UInt8? in
-                let x = Int(round(point.x + normal.dx * CGFloat(offset)))
-                let y = Int(round(point.y + normal.dy * CGFloat(offset)))
-                guard (0..<analysisSize).contains(x), (0..<analysisSize).contains(y) else { return nil }
-                return pixels[y * analysisSize + x]
-            }
-            guard let darkest = values.min(), let brightest = values.max() else { return false }
-            return Int(brightest) - Int(darkest) >= minimumContrast
-        }
+    private struct GrayscaleImage {
+        let pixels: [UInt8]
+        let width: Int
+        let height: Int
     }
 
-    private static func fractionSupported(_ values: [Bool]) -> CGFloat {
-        guard !values.isEmpty else { return 0 }
-        return CGFloat(values.filter { $0 }.count) / CGFloat(values.count)
+    private enum Corner: CaseIterable {
+        case topLeft
+        case topRight
+        case bottomRight
+        case bottomLeft
+    }
+}
+
+private extension UIImage {
+    var normalizedCGImage: CGImage? {
+        if imageOrientation == .up, let cgImage { return cgImage }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            draw(in: CGRect(origin: .zero, size: size))
+        }.cgImage
     }
 }
