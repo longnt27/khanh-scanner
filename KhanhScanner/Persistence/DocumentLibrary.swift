@@ -35,11 +35,6 @@ final class DocumentLibrary: ObservableObject {
         return try repository.images(for: session)
     }
 
-    func setLifecycle(_ lifecycle: DocumentLifecycle, for sessionID: UUID) throws {
-        try repository.setLifecycle(lifecycle, for: sessionID)
-        try reloadThrowing()
-    }
-
     func deleteSession(id: UUID) throws {
         try repository.deleteSession(id: id)
         try reloadThrowing()
