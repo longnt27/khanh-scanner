@@ -4,6 +4,7 @@ struct ContentView: View {
     @StateObject private var library = DocumentLibrary()
     @State private var path: [LibraryRoute] = []
     @State private var scanningSessionID: UUID?
+    @State private var scannerInitialPages: [UIImage] = []
     @State private var showingScanner = false
     @State private var errorMessage: String?
     @State private var isProcessing = false
@@ -40,9 +41,9 @@ struct ContentView: View {
             }
         }
         .fullScreenCover(isPresented: $showingScanner) {
-            DocumentScannerView(onScan: { captured in
+            DocumentScannerView(initialPages: scannerInitialPages, onScan: { drafts in
                 showingScanner = false
-                process(captured, for: scanningSessionID)
+                process(drafts, for: scanningSessionID)
             }, onFailure: { error in
                 showingScanner = false
                 errorMessage = error.localizedDescription
@@ -69,22 +70,32 @@ struct ContentView: View {
     }
 
     private func beginScanning(sessionID: UUID) {
-        scanningSessionID = sessionID
-        showingScanner = true
+        do {
+            scannerInitialPages = try library.images(for: sessionID)
+            scanningSessionID = sessionID
+            showingScanner = true
+        } catch {
+            errorMessage = "Could not open document pages: \(error.localizedDescription)"
+        }
     }
 
-    private func process(_ captured: [UIImage], for sessionID: UUID?) {
+    private func process(_ drafts: [ScannerPageDraft], for sessionID: UUID?) {
         guard let sessionID else { return }
         isProcessing = true
         Task.detached(priority: .userInitiated) {
             let enhancer = DocumentEnhancer()
-            let enhanced = captured.map { image in (try? enhancer.enhance(image)) ?? image }
+            let finalPages = drafts.map { draft in
+                guard draft.needsEnhancement else { return draft.image }
+                return (try? enhancer.enhance(draft.image)) ?? draft.image
+            }
+
             await MainActor.run {
                 do {
-                    try library.appendPages(enhanced, to: sessionID)
+                    try library.replacePages(finalPages, in: sessionID)
                 } catch {
                     errorMessage = "Could not save pages: \(error.localizedDescription)"
                 }
+                scannerInitialPages = []
                 isProcessing = false
             }
         }
