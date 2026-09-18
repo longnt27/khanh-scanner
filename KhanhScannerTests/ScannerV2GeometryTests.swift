@@ -1,3 +1,4 @@
+import CoreImage
 import XCTest
 import simd
 import UIKit
@@ -152,6 +153,21 @@ final class ScannerV2GeometryTests: XCTestCase {
         XCTAssertEqual(tracker.sampleCount, 1)
     }
 
+    func testCameraMotionTrackerDetectsRollRotation() {
+        var tracker = ScannerV2CameraMotionTracker(requiredSamples: 3, maximumRotationDelta: 0.035)
+        let base = matrix_identity_float4x4
+        _ = tracker.append(base)
+        _ = tracker.append(base)
+
+        let angle: Float = 0.12
+        var rotated = matrix_identity_float4x4
+        rotated.columns.0 = SIMD4<Float>(cos(angle), sin(angle), 0, 0)
+        rotated.columns.1 = SIMD4<Float>(-sin(angle), cos(angle), 0, 0)
+
+        XCTAssertFalse(tracker.append(rotated))
+        XCTAssertEqual(tracker.sampleCount, 1)
+    }
+
     func testPageChangeDetectorBlocksDuplicateUntilDocumentMoves() {
         var detector = ScannerV2PageChangeDetector(minimumChange: 0.05)
         let page = ScannerV2Quadrilateral(
@@ -173,6 +189,23 @@ final class ScannerV2GeometryTests: XCTestCase {
         XCTAssertGreaterThan(
             ScannerV2ImageProcessor.sharpnessScore(of: sharp),
             ScannerV2ImageProcessor.sharpnessScore(of: flat) + 0.2
+        )
+    }
+
+    func testSharpnessEstimatorDropsForBlurredEdges() throws {
+        let sharp = testImage(checkerboard: true)
+        let input = try XCTUnwrap(CIImage(image: sharp))
+        let filter = try XCTUnwrap(CIFilter(name: "CIGaussianBlur"))
+        filter.setValue(input, forKey: kCIInputImageKey)
+        filter.setValue(3.0, forKey: kCIInputRadiusKey)
+        let output = try XCTUnwrap(filter.outputImage?.cropped(to: input.extent))
+        let context = CIContext()
+        let cgImage = try XCTUnwrap(context.createCGImage(output, from: output.extent))
+        let blurred = UIImage(cgImage: cgImage)
+
+        XCTAssertGreaterThan(
+            ScannerV2ImageProcessor.sharpnessScore(of: sharp),
+            ScannerV2ImageProcessor.sharpnessScore(of: blurred) + 0.08
         )
     }
 
