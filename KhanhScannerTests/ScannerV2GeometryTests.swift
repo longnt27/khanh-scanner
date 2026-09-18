@@ -363,6 +363,25 @@ final class ScannerV2GeometryTests: XCTestCase {
     }
 
 
+    func testPerspectiveCorrectionRunsBorderCleanupBeforeReturningPage() throws {
+        let source = pageWithBackgroundSlivers()
+        let quadrilateral = ScannerV2Quadrilateral(
+            topLeft: CGPoint(x: 0, y: 1),
+            topRight: CGPoint(x: 1, y: 1),
+            bottomRight: CGPoint(x: 1, y: 0),
+            bottomLeft: CGPoint(x: 0, y: 0)
+        )
+        let corrected = try XCTUnwrap(
+            ScannerV2ImageProcessor.correctedImage(
+                from: try XCTUnwrap(CIImage(image: source)),
+                quadrilateral: quadrilateral
+            )
+        )
+
+        XCTAssertLessThan(corrected.size.width, source.size.width)
+        XCTAssertLessThan(corrected.size.height, source.size.height)
+    }
+
     func testBorderCleanupRemovesThinBackgroundSlivers() throws {
         let source = pageWithBackgroundSlivers()
         let cleaned = try XCTUnwrap(
