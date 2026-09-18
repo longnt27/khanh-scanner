@@ -47,6 +47,28 @@ final class ScannerV2GeometryTests: XCTestCase {
         XCTAssertLessThan(ScannerV2PlaneGeometry.rectangleScore(points), 0.70)
     }
 
+    func testPlaneRectangleFitRegularizesNoisyDetectedCorners() throws {
+        let ideal = [
+            SIMD2<Float>(-0.105, 0.1485),
+            SIMD2<Float>(0.105, 0.1485),
+            SIMD2<Float>(0.105, -0.1485),
+            SIMD2<Float>(-0.105, -0.1485)
+        ]
+        let noisy = [
+            SIMD2<Float>(-0.113, 0.154),
+            SIMD2<Float>(0.108, 0.141),
+            SIMD2<Float>(0.112, -0.146),
+            SIMD2<Float>(-0.099, -0.154)
+        ]
+
+        let fitted = try XCTUnwrap(ScannerV2PlaneGeometry.fittedRectangle(noisy))
+
+        XCTAssertGreaterThan(ScannerV2PlaneGeometry.rectangleScore(fitted), 0.995)
+        for (actual, expected) in zip(fitted, ideal) {
+            XCTAssertLessThan(simd_distance(actual, expected), 0.018)
+        }
+    }
+
     func testTemporalTrackerRequiresConsistentFramesBeforeReady() {
         var tracker = ScannerV2StabilityTracker(requiredSamples: 5, maximumCornerDrift: 0.012)
         let base = ScannerV2Quadrilateral(
