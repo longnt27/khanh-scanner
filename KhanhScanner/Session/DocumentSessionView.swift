@@ -12,6 +12,7 @@ struct DocumentSessionView: View {
     @State private var showingExportConfirmation = false
     @State private var showingDeleteConfirmation = false
     @State private var showingRenameDocument = false
+    @State private var showingPageEditor = false
     @State private var renameDocumentText = ""
     @State private var errorMessage: String?
 
@@ -31,6 +32,7 @@ struct DocumentSessionView: View {
                         pages: pages,
                         onExport: exportPDF,
                         onRescan: onScan,
+                        onEdit: { showingPageEditor = true },
                         rescanTitle: "Add Pages"
                     )
                 }
@@ -77,6 +79,17 @@ struct DocumentSessionView: View {
                 ShareSheet(items: [shareURL], onCompletion: handleExportCompletion)
             }
         }
+        .fullScreenCover(isPresented: $showingPageEditor) {
+            ScannerPageEditorView(
+                pages: pages.map {
+                    ScannerPageDraft(image: $0, needsEnhancement: false)
+                },
+                onCancel: {
+                    showingPageEditor = false
+                },
+                onSave: saveEditedPages
+            )
+        }
         .confirmationDialog(
             "Delete this document and all of its pages?",
             isPresented: $showingDeleteConfirmation,
@@ -114,6 +127,17 @@ struct DocumentSessionView: View {
             pages = try library.images(for: sessionID)
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func saveEditedPages(_ drafts: [ScannerPageDraft]) {
+        do {
+            let editedPages = drafts.map(\.image)
+            try library.replacePages(editedPages, in: sessionID)
+            pages = editedPages
+            showingPageEditor = false
+        } catch {
+            errorMessage = "Could not save page edits: \(error.localizedDescription)"
         }
     }
 

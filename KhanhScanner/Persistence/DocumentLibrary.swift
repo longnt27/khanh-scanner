@@ -28,6 +28,11 @@ final class DocumentLibrary: ObservableObject {
         try reloadThrowing()
     }
 
+    func replacePages(_ pages: [UIImage], in sessionID: UUID) throws {
+        try repository.replacePages(pages, in: sessionID)
+        try reloadThrowing()
+    }
+
     func images(for sessionID: UUID) throws -> [UIImage] {
         guard let session = try repository.session(id: sessionID) else {
             throw DocumentSessionRepositoryError.sessionNotFound

@@ -5,6 +5,65 @@ import UIKit
 @testable import KhanhScanner
 
 final class ScannerV2GeometryTests: XCTestCase {
+    func testPageEditorStateRotatesReordersAndDeletesDrafts() {
+        let firstID = UUID()
+        let secondID = UUID()
+        let thirdID = UUID()
+        var state = ScannerPageEditorState(
+            pages: [
+                ScannerPageDraft(
+                    id: firstID,
+                    image: solidImage(size: CGSize(width: 40, height: 80)),
+                    needsEnhancement: false
+                ),
+                ScannerPageDraft(
+                    id: secondID,
+                    image: solidImage(size: CGSize(width: 50, height: 90)),
+                    needsEnhancement: true
+                ),
+                ScannerPageDraft(
+                    id: thirdID,
+                    image: solidImage(size: CGSize(width: 60, height: 100)),
+                    needsEnhancement: false
+                )
+            ]
+        )
+
+        state.movePage(id: secondID, offset: -1)
+        XCTAssertEqual(state.pages.map(\.id), [secondID, firstID, thirdID])
+
+        state.rotatePage(id: firstID, clockwise: true)
+        XCTAssertEqual(
+            state.pages.first(where: { $0.id == firstID })?.image.size,
+            CGSize(width: 80, height: 40)
+        )
+
+        state.deletePage(id: secondID)
+        XCTAssertEqual(state.pages.map(\.id), [firstID, thirdID])
+    }
+
+    func testManualPerspectiveCropUsesSelectedQuadrilateral() throws {
+        let image = solidImage(size: CGSize(width: 200, height: 300))
+        let quadrilateral = ScannerV2Quadrilateral(
+            topLeft: CGPoint(x: 0.10, y: 0.90),
+            topRight: CGPoint(x: 0.90, y: 0.90),
+            bottomRight: CGPoint(x: 0.90, y: 0.10),
+            bottomLeft: CGPoint(x: 0.10, y: 0.10)
+        )
+
+        let cropped = try XCTUnwrap(
+            ScannerV2ImageProcessor.manualPerspectiveCrop(
+                from: image,
+                quadrilateral: quadrilateral
+            )
+        )
+
+        XCTAssertLessThan(cropped.size.width, image.size.width)
+        XCTAssertLessThan(cropped.size.height, image.size.height)
+        XCTAssertGreaterThan(cropped.size.width, image.size.width * 0.70)
+        XCTAssertGreaterThan(cropped.size.height, image.size.height * 0.70)
+    }
+
     func testRayPlaneIntersectionFindsExpectedPoint() throws {
         let planePoint = SIMD3<Float>(0, 0, 0)
         let planeNormal = SIMD3<Float>(0, 1, 0)
@@ -596,6 +655,15 @@ final class ScannerV2GeometryTests: XCTestCase {
                 }
             }
         }
+    }
+}
+
+private func solidImage(size: CGSize) -> UIImage {
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 1
+    return UIGraphicsImageRenderer(size: size, format: format).image { context in
+        UIColor.white.setFill()
+        context.fill(CGRect(origin: .zero, size: size))
     }
 }
 

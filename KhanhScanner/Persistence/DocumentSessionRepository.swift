@@ -128,6 +128,55 @@ final class DocumentSessionRepository {
         }
     }
 
+    @discardableResult
+    func replacePages(
+        _ images: [UIImage],
+        in sessionID: UUID,
+        modifiedAt: Date = Date()
+    ) throws -> DocumentSession {
+        var catalog = try loadCatalog()
+        guard let index = catalog.sessions.firstIndex(where: { $0.id == sessionID }) else {
+            throw DocumentSessionRepositoryError.sessionNotFound
+        }
+
+        let oldPageIDs = catalog.sessions[index].pageIDs
+        let directory = pageDirectory(for: sessionID)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        var newPageIDs: [UUID] = []
+        do {
+            for image in images {
+                guard let data = image.pngData() else {
+                    throw DocumentSessionRepositoryError.imageEncodingFailed
+                }
+                let pageID = UUID()
+                try data.write(
+                    to: pageURL(sessionID: sessionID, pageID: pageID),
+                    options: .atomic
+                )
+                newPageIDs.append(pageID)
+            }
+
+            catalog.sessions[index].pageIDs = newPageIDs
+            catalog.sessions[index].modifiedAt = modifiedAt
+            try saveCatalog(catalog)
+        } catch {
+            for pageID in newPageIDs {
+                try? fileManager.removeItem(
+                    at: pageURL(sessionID: sessionID, pageID: pageID)
+                )
+            }
+            throw error
+        }
+
+        for pageID in oldPageIDs {
+            try? fileManager.removeItem(
+                at: pageURL(sessionID: sessionID, pageID: pageID)
+            )
+        }
+        return catalog.sessions[index]
+    }
+
     func images(for session: DocumentSession) throws -> [UIImage] {
         try session.pageIDs.map { pageID in
             let url = pageURL(sessionID: session.id, pageID: pageID)

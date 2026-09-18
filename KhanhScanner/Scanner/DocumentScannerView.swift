@@ -13,15 +13,28 @@ struct DocumentScannerView: UIViewControllerRepresentable {
         ScannerV2ViewController.isSupported || VNDocumentCameraViewController.isSupported
     }
 
-    let onScan: ([UIImage]) -> Void
+    let initialPages: [UIImage]
+    let onScan: ([ScannerPageDraft]) -> Void
     let onFailure: (Error) -> Void
     let onCancel: () -> Void
+
+    init(
+        initialPages: [UIImage] = [],
+        onScan: @escaping ([ScannerPageDraft]) -> Void,
+        onFailure: @escaping (Error) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.initialPages = initialPages
+        self.onScan = onScan
+        self.onFailure = onFailure
+        self.onCancel = onCancel
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
     func makeUIViewController(context: Context) -> UIViewController {
         if ScannerV2ViewController.isSupported {
-            let controller = ScannerV2ViewController()
+            let controller = ScannerV2ViewController(initialPages: initialPages)
             controller.delegate = context.coordinator
             ScanDismissalPolicy.protect(controller)
             return controller
@@ -44,7 +57,7 @@ struct DocumentScannerView: UIViewControllerRepresentable {
 
         func scannerV2ViewController(
             _ controller: ScannerV2ViewController,
-            didFinishWith pages: [UIImage]
+            didFinishWith pages: [ScannerPageDraft]
         ) {
             parent.onScan(pages)
         }
@@ -64,9 +77,17 @@ struct DocumentScannerView: UIViewControllerRepresentable {
             _ controller: VNDocumentCameraViewController,
             didFinishWith scan: VNDocumentCameraScan
         ) {
-            let pages = (0..<scan.pageCount).map { scan.imageOfPage(at: $0) }
+            let existing = parent.initialPages.map {
+                ScannerPageDraft(image: $0, needsEnhancement: false)
+            }
+            let captured = (0..<scan.pageCount).map {
+                ScannerPageDraft(
+                    image: scan.imageOfPage(at: $0),
+                    needsEnhancement: true
+                )
+            }
             controller.dismiss(animated: true) { [parent] in
-                parent.onScan(pages)
+                parent.onScan(existing + captured)
             }
         }
 

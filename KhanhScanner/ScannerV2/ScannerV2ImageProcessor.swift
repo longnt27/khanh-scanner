@@ -279,6 +279,32 @@ enum ScannerV2ImageProcessor {
         return documentSignals(from: image, quadrilateral: quadrilateral)
     }
 
+    static func manualPerspectiveCrop(
+        from image: UIImage,
+        quadrilateral: ScannerV2Quadrilateral
+    ) -> UIImage? {
+        guard let cgImage = normalizedCGImage(from: image),
+              let filter = CIFilter(name: "CIPerspectiveCorrection") else {
+            return nil
+        }
+
+        let input = CIImage(cgImage: cgImage)
+        let extent = input.extent
+        filter.setValue(input, forKey: kCIInputImageKey)
+        filter.setValue(vector(quadrilateral.topLeft, in: extent), forKey: "inputTopLeft")
+        filter.setValue(vector(quadrilateral.topRight, in: extent), forKey: "inputTopRight")
+        filter.setValue(vector(quadrilateral.bottomRight, in: extent), forKey: "inputBottomRight")
+        filter.setValue(vector(quadrilateral.bottomLeft, in: extent), forKey: "inputBottomLeft")
+
+        guard let output = filter.outputImage,
+              !output.extent.isEmpty,
+              let rendered = context.createCGImage(output, from: output.extent) else {
+            return nil
+        }
+
+        return UIImage(cgImage: rendered, scale: image.scale, orientation: .up)
+    }
+
     static func correctedImage(
         from pixelBuffer: CVPixelBuffer,
         quadrilateral: ScannerV2Quadrilateral,

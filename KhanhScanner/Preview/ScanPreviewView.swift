@@ -4,6 +4,7 @@ struct ScanPreviewView: View {
     let pages: [UIImage]
     let onExport: () -> Void
     let onRescan: () -> Void
+    var onEdit: (() -> Void)? = nil
     var rescanTitle = "Scan Again"
 
     var body: some View {
@@ -12,6 +13,9 @@ struct ScanPreviewView: View {
                 Text("\(pages.count) page\(pages.count == 1 ? "" : "s")")
                     .font(.headline)
                 Spacer()
+                if let onEdit {
+                    Button("Edit", action: onEdit)
+                }
                 Button(rescanTitle, action: onRescan)
             }
             .padding(.horizontal)
@@ -20,9 +24,20 @@ struct ScanPreviewView: View {
                 LazyHStack(spacing: 16) {
                     ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
                         VStack(alignment: .leading, spacing: 6) {
-                            Image(uiImage: page)
-                                .resizable()
-                                .scaledToFit()
+                            Group {
+                                if let onEdit {
+                                    Button(action: onEdit) {
+                                        Image(uiImage: page)
+                                            .resizable()
+                                            .scaledToFit()
+                                    }
+                                    .buttonStyle(.plain)
+                                } else {
+                                    Image(uiImage: page)
+                                        .resizable()
+                                        .scaledToFit()
+                                }
+                            }
                                 .frame(maxWidth: 310, maxHeight: 520)
                                 .background(Color.white)
                                 .clipShape(RoundedRectangle(cornerRadius: 10))

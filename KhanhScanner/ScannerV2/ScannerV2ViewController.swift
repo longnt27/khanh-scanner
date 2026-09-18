@@ -2,11 +2,12 @@ import ARKit
 import AVFoundation
 import ImageIO
 import SceneKit
+import SwiftUI
 import UIKit
 import Vision
 
 protocol ScannerV2ViewControllerDelegate: AnyObject {
-    func scannerV2ViewController(_ controller: ScannerV2ViewController, didFinishWith pages: [UIImage])
+    func scannerV2ViewController(_ controller: ScannerV2ViewController, didFinishWith pages: [ScannerPageDraft])
     func scannerV2ViewControllerDidCancel(_ controller: ScannerV2ViewController)
     func scannerV2ViewController(_ controller: ScannerV2ViewController, didFailWith error: Error)
 }
@@ -48,7 +49,7 @@ final class ScannerV2ViewController: UIViewController {
 
     private let analysisQueue = DispatchQueue(label: "com.longnt27.KhanhScanner.scanner-v2-analysis")
     private var configuration: ARWorldTrackingConfiguration?
-    private var pages: [UIImage] = []
+    private var pages: [ScannerPageDraft]
     private var latestQuadrilateral: ScannerV2Quadrilateral?
     private var latestFingerprint: ScannerV2PageFingerprint?
     private var latestReadiness: ScannerV2CaptureReadiness = .noDocument
@@ -62,6 +63,18 @@ final class ScannerV2ViewController: UIViewController {
     private var isAnalyzing = false
     private var isCapturing = false
     private var isFinishing = false
+
+    init(initialPages: [UIImage] = []) {
+        pages = initialPages.map {
+            ScannerPageDraft(image: $0, needsEnhancement: false)
+        }
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        pages = []
+        super.init(coder: coder)
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -119,6 +132,10 @@ final class ScannerV2ViewController: UIViewController {
         lastPageView.layer.borderWidth = 1
         lastPageView.layer.borderColor = UIColor.white.withAlphaComponent(0.4).cgColor
         lastPageView.clipsToBounds = true
+        lastPageView.isUserInteractionEnabled = true
+        lastPageView.addGestureRecognizer(
+            UITapGestureRecognizer(target: self, action: #selector(showPageEditor))
+        )
 
         shutterButton.backgroundColor = .white
         shutterButton.layer.cornerRadius = 36
@@ -208,7 +225,7 @@ final class ScannerV2ViewController: UIViewController {
     }
 
     @objc private func finishScanning() {
-        guard !pages.isEmpty, !isFinishing else { return }
+        guard !isFinishing else { return }
         isFinishing = true
         sceneView.session.pause()
         delegate?.scannerV2ViewController(self, didFinishWith: pages)
@@ -395,7 +412,12 @@ final class ScannerV2ViewController: UIViewController {
                     }
 
                     DispatchQueue.main.async {
-                        self.pages.append(corrected)
+                        self.pages.append(
+                            ScannerPageDraft(
+                                image: corrected,
+                                needsEnhancement: true
+                            )
+                        )
                         self.pageChangeDetector.markCaptured(
                             liveQuadrilateral,
                             fingerprint: fingerprint
@@ -415,6 +437,44 @@ final class ScannerV2ViewController: UIViewController {
                 }
             }
         }
+    }
+
+    @objc private func showPageEditor() {
+        guard !pages.isEmpty, !isCapturing, presentedViewController == nil else { return }
+
+        sceneView.session.pause()
+
+        weak var weakHost: UIViewController?
+        let editor = ScannerPageEditorView(
+            pages: pages,
+            onCancel: { [weak self] in
+                weakHost?.dismiss(animated: true) {
+                    self?.resumeSessionAfterEditing()
+                }
+            },
+            onSave: { [weak self] updatedPages in
+                guard let self else { return }
+                self.pages = updatedPages
+                self.pageChangeDetector.reset()
+                self.stabilityTracker.reset()
+                if !updatedPages.isEmpty {
+                    self.autoCaptureRearmGate.markCaptured()
+                }
+                self.updatePageUI()
+                weakHost?.dismiss(animated: true) {
+                    self.resumeSessionAfterEditing()
+                }
+            }
+        )
+        let host = UIHostingController(rootView: editor)
+        weakHost = host
+        host.modalPresentationStyle = .fullScreen
+        present(host, animated: true)
+    }
+
+    private func resumeSessionAfterEditing() {
+        guard !isFinishing, let configuration else { return }
+        sceneView.session.run(configuration)
     }
 
     private func playCaptureFeedback() {
@@ -543,10 +603,10 @@ final class ScannerV2ViewController: UIViewController {
 
     private func updatePageUI() {
         pageCountLabel.text = pages.isEmpty ? "" : "\(pages.count) page\(pages.count == 1 ? "" : "s")"
-        lastPageView.image = pages.last
+        lastPageView.image = pages.last?.image
         lastPageView.isHidden = pages.isEmpty
-        doneButton.isEnabled = !pages.isEmpty
-        doneButton.alpha = pages.isEmpty ? 0.45 : 1
+        doneButton.isEnabled = true
+        doneButton.alpha = 1
     }
 
     private func fail(with error: Error) {
