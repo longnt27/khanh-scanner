@@ -69,6 +69,41 @@ final class ScannerV2GeometryTests: XCTestCase {
         }
     }
 
+    func testWorldRectangleRegularizationUsesPlaneCoordinateSystem() throws {
+        let angle: Float = .pi / 5
+        let rotation = simd_float4x4(
+            SIMD4<Float>(cos(angle), 0, -sin(angle), 0),
+            SIMD4<Float>(0, 1, 0, 0),
+            SIMD4<Float>(sin(angle), 0, cos(angle), 0),
+            SIMD4<Float>(0.4, 0.7, -1.2, 1)
+        )
+
+        let noisyLocal = [
+            SIMD2<Float>(-0.113, 0.154),
+            SIMD2<Float>(0.108, 0.141),
+            SIMD2<Float>(0.112, -0.146),
+            SIMD2<Float>(-0.099, -0.154)
+        ]
+        let world = noisyLocal.map { point -> SIMD3<Float> in
+            let value = rotation * SIMD4<Float>(point.x, 0, point.y, 1)
+            return SIMD3<Float>(value.x, value.y, value.z)
+        }
+
+        let fitted = try XCTUnwrap(
+            ScannerV2PlaneGeometry.regularizedWorldRectangle(
+                world,
+                planeTransform: rotation
+            )
+        )
+
+        XCTAssertEqual(fitted.count, 4)
+        let local = fitted.map { point -> SIMD2<Float> in
+            let value = simd_inverse(rotation) * SIMD4<Float>(point.x, point.y, point.z, 1)
+            return SIMD2<Float>(value.x, value.z)
+        }
+        XCTAssertGreaterThan(ScannerV2PlaneGeometry.rectangleScore(local), 0.995)
+    }
+
     func testTemporalTrackerRequiresConsistentFramesBeforeReady() {
         var tracker = ScannerV2StabilityTracker(requiredSamples: 5, maximumCornerDrift: 0.012)
         let base = ScannerV2Quadrilateral(
