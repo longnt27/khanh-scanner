@@ -3,22 +3,58 @@ import UIKit
 
 final class DocumentEnhancer {
     enum EnhancementError: Error { case invalidImage, renderFailed }
+
     private static let context = CIContext(options: [.cacheIntermediates: true])
+    private static let paperCubeDimension = 24
+    private static let paperCubeData: Data = {
+        let dimension = paperCubeDimension
+        var values = [Float]()
+        values.reserveCapacity(dimension * dimension * dimension * 4)
+
+        for blue in 0..<dimension {
+            let b = Float(blue) / Float(dimension - 1)
+            for green in 0..<dimension {
+                let g = Float(green) / Float(dimension - 1)
+                for red in 0..<dimension {
+                    let r = Float(red) / Float(dimension - 1)
+
+                    let hi = max(r, g, b)
+                    let lo = min(r, g, b)
+                    let saturation = hi > 0.0001 ? (hi - lo) / hi : 0
+                    let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+                    // Paper is generally one of the brighter, less-saturated
+                    // surfaces in a scan. Use soft transitions so pale stamps
+                    // and highlights do not hit a hard threshold.
+                    let bright = smoothstep(0.52, 0.82, luminance)
+                    let lowSaturation = 1 - smoothstep(0.18, 0.55, saturation)
+                    let paperWeight = bright * lowSaturation
+
+                    let neutral = min(1, luminance + (1 - luminance) * 0.65)
+                    values.append(mix(r, neutral, paperWeight))
+                    values.append(mix(g, neutral, paperWeight))
+                    values.append(mix(b, neutral, paperWeight))
+                    values.append(1)
+                }
+            }
+        }
+
+        return values.withUnsafeBytes { Data($0) }
+    }()
 
     func enhance(_ image: UIImage) throws -> UIImage {
         guard let cg = image.cgImage else { throw EnhancementError.invalidImage }
         let input = CIImage(cgImage: cg)
 
-        let balanced = applyPaperWhiteBalance(to: input, source: cg)
+        let neutralized = neutralizePaper(in: input)
 
-        // Push light paper toward white and dark text toward black without
-        // removing saturation. White balance happens first so pages captured
-        // under different color temperatures converge on the same paper tone.
+        // After neutralizing paper-like pixels, add moderate contrast while
+        // retaining chromatic content such as signatures, stamps and marks.
         let controls = CIFilter(name: "CIColorControls")
-        controls?.setValue(balanced, forKey: kCIInputImageKey)
+        controls?.setValue(neutralized, forKey: kCIInputImageKey)
         controls?.setValue(1.18, forKey: kCIInputContrastKey)
-        controls?.setValue(0.08, forKey: kCIInputBrightnessKey)
-        controls?.setValue(1.08, forKey: kCIInputSaturationKey)
+        controls?.setValue(0.05, forKey: kCIInputBrightnessKey)
+        controls?.setValue(1.05, forKey: kCIInputSaturationKey)
 
         guard let output = controls?.outputImage,
               let rendered = Self.context.createCGImage(output, from: input.extent) else {
@@ -27,96 +63,21 @@ final class DocumentEnhancer {
         return UIImage(cgImage: rendered, scale: image.scale, orientation: .up)
     }
 
-    private func applyPaperWhiteBalance(to image: CIImage, source: CGImage) -> CIImage {
-        guard let reference = paperReferenceColor(from: source) else { return image }
-
-        let linearReference = (
-            r: linearSRGB(reference.r),
-            g: linearSRGB(reference.g),
-            b: linearSRGB(reference.b)
-        )
-        let target = max(linearReference.r, linearReference.g, linearReference.b)
-        guard target > 0.08 else { return image }
-
-        let rGain = clamp(target / max(linearReference.r, 0.001), min: 0.75, max: 1.55)
-        let gGain = clamp(target / max(linearReference.g, 0.001), min: 0.75, max: 1.55)
-        let bGain = clamp(target / max(linearReference.b, 0.001), min: 0.75, max: 1.55)
-
-        guard let toLinear = CIFilter(name: "CISRGBToneCurveToLinear"),
-              let matrix = CIFilter(name: "CIColorMatrix"),
-              let toSRGB = CIFilter(name: "CILinearToSRGBToneCurve") else {
-            return image
-        }
-
-        toLinear.setValue(image, forKey: kCIInputImageKey)
-        guard let linearImage = toLinear.outputImage else { return image }
-
-        matrix.setValue(linearImage, forKey: kCIInputImageKey)
-        matrix.setValue(CIVector(x: rGain, y: 0, z: 0, w: 0), forKey: "inputRVector")
-        matrix.setValue(CIVector(x: 0, y: gGain, z: 0, w: 0), forKey: "inputGVector")
-        matrix.setValue(CIVector(x: 0, y: 0, z: bGain, w: 0), forKey: "inputBVector")
-        matrix.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputAVector")
-        matrix.setValue(CIVector(x: 0, y: 0, z: 0, w: 0), forKey: "inputBiasVector")
-
-        guard let balancedLinear = matrix.outputImage else { return image }
-        toSRGB.setValue(balancedLinear, forKey: kCIInputImageKey)
-        return toSRGB.outputImage ?? image
+    private func neutralizePaper(in image: CIImage) -> CIImage {
+        guard let cube = CIFilter(name: "CIColorCube") else { return image }
+        cube.setValue(image, forKey: kCIInputImageKey)
+        cube.setValue(Self.paperCubeDimension, forKey: "inputCubeDimension")
+        cube.setValue(Self.paperCubeData, forKey: "inputCubeData")
+        return cube.outputImage ?? image
     }
 
-    private func paperReferenceColor(from image: CGImage) -> (r: CGFloat, g: CGFloat, b: CGFloat)? {
-        let side = 32
-        var bytes = [UInt8](repeating: 0, count: side * side * 4)
-        let rendered = bytes.withUnsafeMutableBytes { buffer -> Bool in
-            guard let context = CGContext(
-                data: buffer.baseAddress,
-                width: side,
-                height: side,
-                bitsPerComponent: 8,
-                bytesPerRow: side * 4,
-                space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-                    | CGBitmapInfo.byteOrder32Big.rawValue
-            ) else {
-                return false
-            }
-            context.interpolationQuality = .medium
-            context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
-            return true
-        }
-        guard rendered else { return nil }
-
-        var samples: [(luma: CGFloat, r: CGFloat, g: CGFloat, b: CGFloat)] = []
-        samples.reserveCapacity(side * side)
-
-        for index in stride(from: 0, to: bytes.count, by: 4) {
-            let r = CGFloat(bytes[index]) / 255
-            let g = CGFloat(bytes[index + 1]) / 255
-            let b = CGFloat(bytes[index + 2]) / 255
-            let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
-            samples.append((luma, r, g, b))
-        }
-
-        samples.sort { $0.luma > $1.luma }
-        let count = max(1, samples.count / 5)
-        let brightest = samples.prefix(count)
-        let scale = 1 / CGFloat(count)
-
-        return (
-            r: brightest.reduce(0) { $0 + $1.r } * scale,
-            g: brightest.reduce(0) { $0 + $1.g } * scale,
-            b: brightest.reduce(0) { $0 + $1.b } * scale
-        )
+    private static func smoothstep(_ lower: Float, _ upper: Float, _ value: Float) -> Float {
+        guard upper > lower else { return value >= upper ? 1 : 0 }
+        let t = min(1, max(0, (value - lower) / (upper - lower)))
+        return t * t * (3 - 2 * t)
     }
 
-    private func linearSRGB(_ value: CGFloat) -> CGFloat {
-        if value <= 0.04045 {
-            return value / 12.92
-        }
-        return pow((value + 0.055) / 1.055, 2.4)
+    private static func mix(_ from: Float, _ to: Float, _ amount: Float) -> Float {
+        from + (to - from) * amount
     }
-
-    private func clamp(_ value: CGFloat, min lower: CGFloat, max upper: CGFloat) -> CGFloat {
-        Swift.min(upper, Swift.max(lower, value))
-    }
-
 }
