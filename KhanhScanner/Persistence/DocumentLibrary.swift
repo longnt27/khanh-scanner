@@ -2,6 +2,7 @@ import SwiftUI
 
 final class DocumentLibrary: ObservableObject {
     @Published private(set) var sessions: [DocumentSession] = []
+    @Published private(set) var folders: [DocumentFolder] = []
     @Published private(set) var loadError: String?
 
     private let repository: DocumentSessionRepository
@@ -16,8 +17,8 @@ final class DocumentLibrary: ObservableObject {
     }
 
     @discardableResult
-    func createSession() throws -> DocumentSession {
-        let session = try repository.createSession()
+    func createSession(in folderID: UUID? = nil) throws -> DocumentSession {
+        let session = try repository.createSession(folderID: folderID)
         try reloadThrowing()
         return session
     }
@@ -44,6 +45,33 @@ final class DocumentLibrary: ObservableObject {
         try reloadThrowing()
     }
 
+    @discardableResult
+    func createFolder(
+        name: String,
+        parentFolderID: UUID?,
+        sessionIDs: [UUID] = [],
+        folderIDs: [UUID] = []
+    ) throws -> DocumentFolder {
+        let folder = try repository.createFolder(
+            name: name,
+            parentFolderID: parentFolderID,
+            sessionIDs: sessionIDs,
+            folderIDs: folderIDs
+        )
+        try reloadThrowing()
+        return folder
+    }
+
+    func move(sessionIDs: [UUID], folderIDs: [UUID], to destinationFolderID: UUID?) throws {
+        try repository.move(sessionIDs: sessionIDs, folderIDs: folderIDs, to: destinationFolderID)
+        try reloadThrowing()
+    }
+
+    func deleteFolder(id: UUID) throws {
+        try repository.deleteFolder(id: id)
+        try reloadThrowing()
+    }
+
     private func reload() {
         do {
             try reloadThrowing()
@@ -54,6 +82,7 @@ final class DocumentLibrary: ObservableObject {
 
     private func reloadThrowing() throws {
         sessions = try repository.sessions()
+        folders = try repository.folders()
         loadError = nil
     }
 }
