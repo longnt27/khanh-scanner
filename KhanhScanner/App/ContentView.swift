@@ -1,5 +1,4 @@
 import SwiftUI
-import VisionKit
 
 struct ContentView: View {
     @State private var pages: [UIImage] = []
@@ -28,9 +27,9 @@ struct ContentView: View {
                                 .padding(.vertical, 8)
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(isProcessing || !VNDocumentCameraViewController.isSupported)
+                        .disabled(isProcessing || !DocumentCameraViewController.isSupported)
 
-                        if !VNDocumentCameraViewController.isSupported {
+                        if !DocumentCameraViewController.isSupported {
                             Text("Document scanning requires a supported iPhone or iPad.")
                                 .font(.footnote).foregroundStyle(.secondary)
                         }
