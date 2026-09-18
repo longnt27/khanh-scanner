@@ -192,6 +192,21 @@ final class ScannerV2GeometryTests: XCTestCase {
         )
     }
 
+    func testSharpnessEstimatorTreatsSparseDocumentTextAsSharp() {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let page = UIGraphicsImageRenderer(size: CGSize(width: 128, height: 128), format: format).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 128, height: 128))
+            UIColor.black.setFill()
+            for row in 0..<8 {
+                context.fill(CGRect(x: 18, y: 20 + row * 12, width: 92, height: 2))
+            }
+        }
+
+        XCTAssertGreaterThan(ScannerV2ImageProcessor.sharpnessScore(of: page), 0.25)
+    }
+
     func testSharpnessEstimatorDropsForBlurredEdges() throws {
         let sharp = testImage(checkerboard: true)
         let input = try XCTUnwrap(CIImage(image: sharp))
