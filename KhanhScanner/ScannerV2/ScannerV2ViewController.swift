@@ -44,6 +44,7 @@ final class ScannerV2ViewController: UIViewController {
     private let shutterButton = UIButton(type: .custom)
     private let doneButton = UIButton(type: .system)
     private let cancelButton = UIButton(type: .system)
+    private let captureFlashView = UIView()
 
     private let analysisQueue = DispatchQueue(label: "com.longnt27.KhanhScanner.scanner-v2-analysis")
     private var configuration: ARWorldTrackingConfiguration?
@@ -140,7 +141,17 @@ final class ScannerV2ViewController: UIViewController {
             view.addSubview($0)
         }
 
+        captureFlashView.translatesAutoresizingMaskIntoConstraints = false
+        captureFlashView.backgroundColor = .white
+        captureFlashView.alpha = 0
+        captureFlashView.isUserInteractionEnabled = false
+        view.addSubview(captureFlashView)
+
         NSLayoutConstraint.activate([
+            captureFlashView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            captureFlashView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            captureFlashView.topAnchor.constraint(equalTo: view.topAnchor),
+            captureFlashView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             cancelButton.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
             cancelButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
 
@@ -293,7 +304,7 @@ final class ScannerV2ViewController: UIViewController {
         )
         latestReadiness = readiness
         draw(quadrilateral, frame: frame, readiness: readiness)
-        updateStatus(readiness)
+        updateStatus(autoCaptureRearmGate.isArmed ? readiness : .captured)
 
         let now = CACurrentMediaTime()
         if readiness == .ready,
@@ -394,7 +405,8 @@ final class ScannerV2ViewController: UIViewController {
                         self.isCapturing = false
                         self.stabilityTracker.reset()
                         self.updatePageUI()
-                        self.updateStatus(.holdSteady)
+                        self.updateStatus(.captured)
+                        self.playCaptureFeedback()
                     }
                 } catch {
                     DispatchQueue.main.async {
@@ -402,6 +414,42 @@ final class ScannerV2ViewController: UIViewController {
                     }
                 }
             }
+        }
+    }
+
+    private func playCaptureFeedback() {
+        let haptic = UIImpactFeedbackGenerator(style: .medium)
+        haptic.prepare()
+        haptic.impactOccurred()
+
+        captureFlashView.layer.removeAllAnimations()
+        captureFlashView.alpha = 0
+        UIView.animate(
+            withDuration: 0.06,
+            delay: 0,
+            options: [.beginFromCurrentState, .curveEaseOut]
+        ) {
+            self.captureFlashView.alpha = 0.9
+        } completion: { _ in
+            UIView.animate(
+                withDuration: 0.22,
+                delay: 0.02,
+                options: [.beginFromCurrentState, .curveEaseIn]
+            ) {
+                self.captureFlashView.alpha = 0
+            }
+        }
+
+        lastPageView.layer.removeAllAnimations()
+        lastPageView.transform = CGAffineTransform(scaleX: 0.78, y: 0.78)
+        UIView.animate(
+            withDuration: 0.34,
+            delay: 0.06,
+            usingSpringWithDamping: 0.58,
+            initialSpringVelocity: 0.7,
+            options: [.beginFromCurrentState]
+        ) {
+            self.lastPageView.transform = .identity
         }
     }
 
@@ -522,25 +570,6 @@ extension ScannerV2ViewController: ARSessionDelegate {
     func session(_ session: ARSession, didFailWithError error: Error) {
         DispatchQueue.main.async { [weak self] in
             self?.fail(with: error)
-        }
-    }
-}
-
-private extension ScannerV2CaptureReadiness {
-    var statusText: String {
-        switch self {
-        case .noDocument:
-            "Find a document"
-        case .holdSteady:
-            "Hold steady"
-        case .alignDocument:
-            "Align the page"
-        case .waitForCamera:
-            "Focusing…"
-        case .tooSoft:
-            "Hold steady for a sharper scan"
-        case .ready:
-            "Ready"
         }
     }
 }
