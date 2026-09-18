@@ -38,11 +38,13 @@ struct ScannerV2Quadrilateral: Equatable, Codable {
             .map { hypot($0.x - $1.x, $0.y - $1.y) }
         guard edgeLengths.allSatisfy({ $0 >= 0.02 }) else { return false }
 
-        let signedArea = zip(points, Array(points.dropFirst()) + [points[0]])
-            .reduce(CGFloat.zero) { partial, pair in
-                partial + pair.0.x * pair.1.y - pair.1.x * pair.0.y
-            } / 2
-        guard abs(signedArea) >= 0.01 else { return false }
+        var twiceSignedArea: CGFloat = 0
+        for index in points.indices {
+            let current = points[index]
+            let next = points[(index + 1) % points.count]
+            twiceSignedArea += current.x * next.y - next.x * current.y
+        }
+        guard abs(twiceSignedArea / 2) >= 0.01 else { return false }
 
         guard !Self.segmentsIntersect(topLeft, topRight, bottomRight, bottomLeft),
               !Self.segmentsIntersect(topRight, bottomRight, bottomLeft, topLeft) else {
