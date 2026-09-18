@@ -2,11 +2,18 @@ import CoreGraphics
 import Foundation
 import simd
 
-struct ScannerV2Quadrilateral: Equatable {
+struct ScannerV2Quadrilateral: Equatable, Codable {
     let topLeft: CGPoint
     let topRight: CGPoint
     let bottomRight: CGPoint
     let bottomLeft: CGPoint
+
+    static let fullBounds = ScannerV2Quadrilateral(
+        topLeft: CGPoint(x: 0, y: 1),
+        topRight: CGPoint(x: 1, y: 1),
+        bottomRight: CGPoint(x: 1, y: 0),
+        bottomLeft: CGPoint(x: 0, y: 0)
+    )
 
     var points: [CGPoint] {
         [topLeft, topRight, bottomRight, bottomLeft]
