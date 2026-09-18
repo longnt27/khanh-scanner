@@ -22,6 +22,7 @@
  A10000000000000000000018 = {isa = PBXBuildFile; fileRef = A20000000000000000000021; };
  A10000000000000000000019 = {isa = PBXBuildFile; fileRef = A20000000000000000000022; };
  A10000000000000000000020 = {isa = PBXBuildFile; fileRef = A20000000000000000000023; };
+ A10000000000000000000020 = {isa = PBXBuildFile; fileRef = A20000000000000000000023; };
  A10000000000000000000021 = {isa = PBXBuildFile; fileRef = A20000000000000000000024; };
  A10000000000000000000022 = {isa = PBXBuildFile; fileRef = A20000000000000000000025; };
 /* End PBXBuildFile section */
@@ -51,6 +52,7 @@
  A20000000000000000000020 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence/DocumentFolder.swift; sourceTree = "<group>"; };
  A20000000000000000000021 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Folders/LibraryBrowserView.swift; sourceTree = "<group>"; };
  A20000000000000000000022 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerV2GeometryTests.swift; sourceTree = "<group>"; };
+ A20000000000000000000023 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scanner/ScannerV2Geometry.swift; sourceTree = "<group>"; };
  A20000000000000000000023 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerV2/ScannerV2Core.swift; sourceTree = "<group>"; };
  A20000000000000000000024 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerV2/ScannerV2ImageProcessor.swift; sourceTree = "<group>"; };
  A20000000000000000000025 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerV2/ScannerV2ViewController.swift; sourceTree = "<group>"; };
