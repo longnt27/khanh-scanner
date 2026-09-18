@@ -23,11 +23,13 @@ struct DocumentSessionView: View {
                         systemImage: "doc.viewfinder",
                         description: Text("Scan pages now or return later. This document is already saved.")
                     )
-                    .overlay(alignment: .bottom) {
-                        scanButton.padding()
-                    }
                 } else {
-                    ScanPreviewView(pages: pages, onExport: exportPDF, onRescan: onScan)
+                    ScanPreviewView(
+                        pages: pages,
+                        onExport: exportPDF,
+                        onRescan: session.lifecycle == .active ? onScan : resumeScan,
+                        rescanTitle: session.lifecycle == .active ? "Add Pages" : "Resume Scan"
+                    )
                 }
             } else {
                 ContentUnavailableView("Document Not Found", systemImage: "exclamationmark.triangle")
@@ -35,6 +37,37 @@ struct DocumentSessionView: View {
         }
         .navigationTitle(session.map(title) ?? "Document")
         .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom) {
+            if let session {
+                VStack(spacing: 10) {
+                    if pages.isEmpty {
+                        Button(action: session.lifecycle == .active ? onScan : resumeScan) {
+                            Label(
+                                session.lifecycle == .active ? "Scan Pages" : "Resume Scan",
+                                systemImage: "camera.viewfinder"
+                            )
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+
+                    if session.lifecycle == .active {
+                        Button(action: finishSession) {
+                            Label("Done", systemImage: "checkmark.circle.fill")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.green)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .background(.bar)
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button(role: .destructive) { showingDeleteConfirmation = true } label: {
@@ -63,15 +96,6 @@ struct DocumentSessionView: View {
         }
     }
 
-    private var scanButton: some View {
-        Button(action: onScan) {
-            Label("Scan Pages", systemImage: "camera.viewfinder")
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-        }
-        .buttonStyle(.borderedProminent)
-    }
-
     private var errorBinding: Binding<Bool> {
         Binding(
             get: { errorMessage != nil },
@@ -93,6 +117,24 @@ struct DocumentSessionView: View {
             showingShare = true
         } catch {
             errorMessage = "Could not create PDF: \(error.localizedDescription)"
+        }
+    }
+
+    private func finishSession() {
+        do {
+            try library.setLifecycle(.archived, for: sessionID)
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func resumeScan() {
+        do {
+            try library.setLifecycle(.active, for: sessionID)
+            onScan()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 

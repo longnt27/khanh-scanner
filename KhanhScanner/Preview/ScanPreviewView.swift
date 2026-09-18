@@ -4,6 +4,7 @@ struct ScanPreviewView: View {
     let pages: [UIImage]
     let onExport: () -> Void
     let onRescan: () -> Void
+    var rescanTitle = "Scan Again"
 
     var body: some View {
         VStack(spacing: 16) {
@@ -11,7 +12,7 @@ struct ScanPreviewView: View {
                 Text("\(pages.count) page\(pages.count == 1 ? "" : "s")")
                     .font(.headline)
                 Spacer()
-                Button("Scan Again", action: onRescan)
+                Button(rescanTitle, action: onRescan)
             }
             .padding(.horizontal)
 
