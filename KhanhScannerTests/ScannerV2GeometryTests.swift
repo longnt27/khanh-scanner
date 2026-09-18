@@ -1,5 +1,6 @@
 import XCTest
 import simd
+import UIKit
 @testable import KhanhScanner
 
 final class ScannerV2GeometryTests: XCTestCase {
@@ -116,6 +117,80 @@ final class ScannerV2GeometryTests: XCTestCase {
             ),
             .holdSteady
         )
+    }
+    func testPlaneRectangleScoreWorksDirectlyIn3D() {
+        let points = [
+            SIMD3<Float>(-0.105, 0, 0.1485),
+            SIMD3<Float>(0.105, 0, 0.1485),
+            SIMD3<Float>(0.105, 0, -0.1485),
+            SIMD3<Float>(-0.105, 0, -0.1485)
+        ]
+
+        XCTAssertGreaterThan(ScannerV2PlaneGeometry.rectangleScore3D(points), 0.95)
+    }
+
+    func testCameraMotionTrackerNeedsSeveralQuietFrames() {
+        var tracker = ScannerV2CameraMotionTracker(requiredSamples: 4)
+        let base = matrix_identity_float4x4
+
+        XCTAssertFalse(tracker.append(base))
+        XCTAssertFalse(tracker.append(base))
+        XCTAssertFalse(tracker.append(base))
+        XCTAssertTrue(tracker.append(base))
+    }
+
+    func testCameraMotionTrackerResetsAfterLargeMovement() {
+        var tracker = ScannerV2CameraMotionTracker(requiredSamples: 3)
+        let base = matrix_identity_float4x4
+        _ = tracker.append(base)
+        _ = tracker.append(base)
+
+        var moved = base
+        moved.columns.3.x = 0.08
+
+        XCTAssertFalse(tracker.append(moved))
+        XCTAssertEqual(tracker.sampleCount, 1)
+    }
+
+    func testPageChangeDetectorBlocksDuplicateUntilDocumentMoves() {
+        var detector = ScannerV2PageChangeDetector(minimumChange: 0.05)
+        let page = ScannerV2Quadrilateral(
+            topLeft: CGPoint(x: 0.2, y: 0.8),
+            topRight: CGPoint(x: 0.8, y: 0.8),
+            bottomRight: CGPoint(x: 0.8, y: 0.2),
+            bottomLeft: CGPoint(x: 0.2, y: 0.2)
+        )
+
+        detector.markCaptured(page)
+        XCTAssertFalse(detector.canCapture(page.offset(dx: 0.005, dy: 0)))
+        XCTAssertTrue(detector.canCapture(page.offset(dx: 0.12, dy: 0)))
+    }
+
+    func testSharpnessEstimatorDistinguishesEdgesFromFlatImage() {
+        let flat = testImage(checkerboard: false)
+        let sharp = testImage(checkerboard: true)
+
+        XCTAssertGreaterThan(
+            ScannerV2ImageProcessor.sharpnessScore(of: sharp),
+            ScannerV2ImageProcessor.sharpnessScore(of: flat) + 0.2
+        )
+    }
+
+    private func testImage(checkerboard: Bool) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64), format: format).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+            guard checkerboard else { return }
+
+            UIColor.black.setFill()
+            for y in stride(from: 0, to: 64, by: 8) {
+                for x in stride(from: 0, to: 64, by: 8) where ((x + y) / 8).isMultiple(of: 2) {
+                    context.fill(CGRect(x: x, y: y, width: 8, height: 8))
+                }
+            }
+        }
     }
 }
 
