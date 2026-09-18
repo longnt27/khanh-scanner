@@ -10,6 +10,30 @@ final class DocumentEnhancerTests: XCTestCase {
         XCTAssertGreaterThan(luminance(after), 0.85)
     }
 
+    func testNormalizesWarmAndCoolPaperTowardNeutralWhite() throws {
+        let warm = try components(
+            DocumentEnhancer().enhance(
+                solid(UIColor(red: 0.94, green: 0.86, blue: 0.72, alpha: 1))
+            )
+        )
+        let cool = try components(
+            DocumentEnhancer().enhance(
+                solid(UIColor(red: 0.78, green: 0.87, blue: 0.96, alpha: 1))
+            )
+        )
+
+        print("WHITE_BALANCE_DIAG warm=\(warm) cool=\(cool) warmSpread=\(channelSpread(warm)) coolSpread=\(channelSpread(cool)) warmLuma=\(luminance(warm)) coolLuma=\(luminance(cool))")
+        XCTAssertLessThan(channelSpread(warm), 0.08, "warm=\(warm)")
+        XCTAssertLessThan(channelSpread(cool), 0.08, "cool=\(cool)")
+        XCTAssertGreaterThan(luminance(warm), 0.88, "warm=\(warm)")
+        XCTAssertGreaterThan(luminance(cool), 0.88, "cool=\(cool)")
+        XCTAssertLessThan(
+            abs(luminance(warm) - luminance(cool)),
+            0.06,
+            "warm=\(warm), cool=\(cool)"
+        )
+    }
+
     func testKeepsDarkTextDark() throws {
         let after = try components(DocumentEnhancer().enhance(solid(UIColor(white: 0.12, alpha: 1))))
         XCTAssertLessThan(luminance(after), 0.3)
@@ -42,6 +66,7 @@ final class DocumentEnhancerTests: XCTestCase {
     }
 
     private func luminance(_ c: (r: CGFloat, g: CGFloat, b: CGFloat)) -> CGFloat { 0.2126*c.r + 0.7152*c.g + 0.0722*c.b }
+    private func channelSpread(_ c: (r: CGFloat, g: CGFloat, b: CGFloat)) -> CGFloat { max(c.r, c.g, c.b) - min(c.r, c.g, c.b) }
     private func saturation(_ c: (r: CGFloat, g: CGFloat, b: CGFloat)) -> CGFloat {
         let hi = max(c.r, c.g, c.b), lo = min(c.r, c.g, c.b)
         return hi == 0 ? 0 : (hi - lo) / hi
