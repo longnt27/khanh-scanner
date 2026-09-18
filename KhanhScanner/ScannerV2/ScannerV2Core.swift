@@ -71,6 +71,31 @@ enum ScannerV2PlaneGeometry {
 
         return max(0, min(1, min(orthogonality, parallelism, oppositeLengthSimilarity)))
     }
+    static func rectangleScore3D(_ points: [SIMD3<Float>]) -> Float {
+        guard points.count == 4 else { return 0 }
+        let edges = points.indices.map { index in
+            points[(index + 1) % points.count] - points[index]
+        }
+        let lengths = edges.map(simd_length)
+        guard lengths.allSatisfy({ $0 > 0.000_1 }) else { return 0 }
+
+        let normalized = edges.map(simd_normalize)
+        let orthogonality = normalized.indices.map { index -> Float in
+            let next = normalized[(index + 1) % normalized.count]
+            return 1 - min(1, abs(simd_dot(normalized[index], next)))
+        }.min() ?? 0
+
+        let parallelism = min(
+            abs(simd_dot(normalized[0], normalized[2])),
+            abs(simd_dot(normalized[1], normalized[3]))
+        )
+        let oppositeLengthSimilarity = min(
+            min(lengths[0], lengths[2]) / max(lengths[0], lengths[2]),
+            min(lengths[1], lengths[3]) / max(lengths[1], lengths[3])
+        )
+
+        return max(0, min(1, min(orthogonality, parallelism, oppositeLengthSimilarity)))
+    }
 }
 
 struct ScannerV2StabilityTracker {
@@ -140,5 +165,95 @@ enum ScannerV2CaptureGate {
         }
 
         return .ready
+    }
+}
+
+
+struct ScannerV2CameraMotionTracker {
+    let requiredSamples: Int
+    let maximumTranslationDelta: Float
+    let maximumRotationDelta: Float
+
+    private var previousTransform: simd_float4x4?
+    private(set) var sampleCount: Int = 0
+
+    init(
+        requiredSamples: Int = 5,
+        maximumTranslationDelta: Float = 0.012,
+        maximumRotationDelta: Float = 0.035
+    ) {
+        self.requiredSamples = max(1, requiredSamples)
+        self.maximumTranslationDelta = maximumTranslationDelta
+        self.maximumRotationDelta = maximumRotationDelta
+    }
+
+    mutating func append(_ transform: simd_float4x4) -> Bool {
+        guard let previousTransform else {
+            self.previousTransform = transform
+            sampleCount = 1
+            return requiredSamples == 1
+        }
+
+        let previousPosition = SIMD3<Float>(
+            previousTransform.columns.3.x,
+            previousTransform.columns.3.y,
+            previousTransform.columns.3.z
+        )
+        let position = SIMD3<Float>(
+            transform.columns.3.x,
+            transform.columns.3.y,
+            transform.columns.3.z
+        )
+        let translationDelta = simd_distance(previousPosition, position)
+
+        let previousForward = simd_normalize(SIMD3<Float>(
+            -previousTransform.columns.2.x,
+            -previousTransform.columns.2.y,
+            -previousTransform.columns.2.z
+        ))
+        let forward = simd_normalize(SIMD3<Float>(
+            -transform.columns.2.x,
+            -transform.columns.2.y,
+            -transform.columns.2.z
+        ))
+        let cosine = max(-1, min(1, simd_dot(previousForward, forward)))
+        let rotationDelta = acos(cosine)
+
+        self.previousTransform = transform
+
+        if translationDelta > maximumTranslationDelta || rotationDelta > maximumRotationDelta {
+            sampleCount = 1
+            return requiredSamples == 1
+        }
+
+        sampleCount = min(requiredSamples, sampleCount + 1)
+        return sampleCount >= requiredSamples
+    }
+
+    mutating func reset() {
+        previousTransform = nil
+        sampleCount = 0
+    }
+}
+
+struct ScannerV2PageChangeDetector {
+    let minimumChange: CGFloat
+    private var capturedQuadrilateral: ScannerV2Quadrilateral?
+
+    init(minimumChange: CGFloat = 0.05) {
+        self.minimumChange = minimumChange
+    }
+
+    mutating func markCaptured(_ quadrilateral: ScannerV2Quadrilateral) {
+        capturedQuadrilateral = quadrilateral
+    }
+
+    func canCapture(_ quadrilateral: ScannerV2Quadrilateral) -> Bool {
+        guard let capturedQuadrilateral else { return true }
+        return capturedQuadrilateral.maximumCornerDistance(to: quadrilateral) >= minimumChange
+    }
+
+    mutating func reset() {
+        capturedQuadrilateral = nil
     }
 }
