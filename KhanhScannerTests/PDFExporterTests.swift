@@ -24,6 +24,18 @@ final class PDFExporterTests: XCTestCase {
         XCTAssertGreaterThan(second.width, second.height)
     }
 
+    func testPDFFileWriterUsesSanitizedDocumentName() throws {
+        let url = try PDFFileWriter.write(
+            Data("pdf".utf8),
+            suggestedName: "  Client / Contract: 2026  "
+        )
+        defer {
+            try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+        }
+
+        XCTAssertEqual(url.lastPathComponent, "Client - Contract- 2026.pdf")
+    }
+
     private func image(width: CGFloat, height: CGFloat) -> UIImage {
         UIGraphicsImageRenderer(size: CGSize(width: width, height: height)).image { context in
             UIColor.white.setFill()
