@@ -2,11 +2,18 @@ import CoreGraphics
 import Foundation
 import simd
 
-struct ScannerV2Quadrilateral: Equatable {
+struct ScannerV2Quadrilateral: Equatable, Codable {
     let topLeft: CGPoint
     let topRight: CGPoint
     let bottomRight: CGPoint
     let bottomLeft: CGPoint
+
+    static let fullBounds = ScannerV2Quadrilateral(
+        topLeft: CGPoint(x: 0, y: 1),
+        topRight: CGPoint(x: 1, y: 1),
+        bottomRight: CGPoint(x: 1, y: 0),
+        bottomLeft: CGPoint(x: 0, y: 0)
+    )
 
     var points: [CGPoint] {
         [topLeft, topRight, bottomRight, bottomLeft]
@@ -16,6 +23,52 @@ struct ScannerV2Quadrilateral: Equatable {
         zip(points, other.points)
             .map { hypot($0.x - $1.x, $0.y - $1.y) }
             .max() ?? 0
+    }
+
+    var isValidCrop: Bool {
+        guard points.allSatisfy({
+            $0.x.isFinite && $0.y.isFinite
+                && (0...1).contains($0.x)
+                && (0...1).contains($0.y)
+        }) else {
+            return false
+        }
+
+        let edgeLengths = zip(points, Array(points.dropFirst()) + [points[0]])
+            .map { hypot($0.x - $1.x, $0.y - $1.y) }
+        guard edgeLengths.allSatisfy({ $0 >= 0.02 }) else { return false }
+
+        var twiceSignedArea: CGFloat = 0
+        for index in points.indices {
+            let current = points[index]
+            let next = points[(index + 1) % points.count]
+            twiceSignedArea += current.x * next.y - next.x * current.y
+        }
+        guard abs(twiceSignedArea / 2) >= 0.01 else { return false }
+
+        guard !Self.segmentsIntersect(topLeft, topRight, bottomRight, bottomLeft),
+              !Self.segmentsIntersect(topRight, bottomRight, bottomLeft, topLeft) else {
+            return false
+        }
+
+        return true
+    }
+
+    private static func segmentsIntersect(
+        _ a: CGPoint,
+        _ b: CGPoint,
+        _ c: CGPoint,
+        _ d: CGPoint
+    ) -> Bool {
+        func cross(_ p: CGPoint, _ q: CGPoint, _ r: CGPoint) -> CGFloat {
+            (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)
+        }
+
+        let abC = cross(a, b, c)
+        let abD = cross(a, b, d)
+        let cdA = cross(c, d, a)
+        let cdB = cross(c, d, b)
+        return abC * abD < 0 && cdA * cdB < 0
     }
 }
 

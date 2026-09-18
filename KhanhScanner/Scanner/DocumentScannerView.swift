@@ -13,13 +13,13 @@ struct DocumentScannerView: UIViewControllerRepresentable {
         ScannerV2ViewController.isSupported || VNDocumentCameraViewController.isSupported
     }
 
-    let initialPages: [UIImage]
+    let initialPages: [ScannerPageDraft]
     let onScan: ([ScannerPageDraft]) -> Void
     let onFailure: (Error) -> Void
     let onCancel: () -> Void
 
     init(
-        initialPages: [UIImage] = [],
+        initialPages: [ScannerPageDraft] = [],
         onScan: @escaping ([ScannerPageDraft]) -> Void,
         onFailure: @escaping (Error) -> Void,
         onCancel: @escaping () -> Void
@@ -77,9 +77,7 @@ struct DocumentScannerView: UIViewControllerRepresentable {
             _ controller: VNDocumentCameraViewController,
             didFinishWith scan: VNDocumentCameraScan
         ) {
-            let existing = parent.initialPages.map {
-                ScannerPageDraft(image: $0, needsEnhancement: false)
-            }
+            let existing = parent.initialPages
             let captured = (0..<scan.pageCount).map {
                 ScannerPageDraft(
                     image: scan.imageOfPage(at: $0),

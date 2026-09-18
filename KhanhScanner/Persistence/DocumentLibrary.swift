@@ -33,6 +33,42 @@ final class DocumentLibrary: ObservableObject {
         try reloadThrowing()
     }
 
+    func pageRecords(for sessionID: UUID) throws -> [DocumentPage] {
+        try repository.pageRecords(for: sessionID)
+    }
+
+    func pageAssets(for sessionID: UUID) throws -> [DocumentPageAssets] {
+        try repository.pageAssets(for: sessionID)
+    }
+
+    func sourceImage(for pageID: UUID, in sessionID: UUID) throws -> UIImage {
+        try repository.sourceImage(for: pageID, in: sessionID)
+    }
+
+    func renderedImage(for pageID: UUID, in sessionID: UUID) throws -> UIImage {
+        try repository.renderedImage(for: pageID, in: sessionID)
+    }
+
+    func appendPageRecords(_ assets: [DocumentPageAssets], to sessionID: UUID) throws {
+        try repository.appendPageRecords(assets, to: sessionID)
+        try reloadThrowing()
+    }
+
+    func updatePage(_ page: DocumentPage, in sessionID: UUID, renderedImage: UIImage) throws {
+        try repository.updatePage(page, in: sessionID, renderedImage: renderedImage)
+        try reloadThrowing()
+    }
+
+    func deletePage(id pageID: UUID, from sessionID: UUID) throws {
+        try repository.deletePage(id: pageID, from: sessionID)
+        try reloadThrowing()
+    }
+
+    func reorderPages(_ pageIDs: [UUID], in sessionID: UUID) throws {
+        try repository.reorderPages(pageIDs, in: sessionID)
+        try reloadThrowing()
+    }
+
     func images(for sessionID: UUID) throws -> [UIImage] {
         guard let session = try repository.session(id: sessionID) else {
             throw DocumentSessionRepositoryError.sessionNotFound

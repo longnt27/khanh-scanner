@@ -6,17 +6,19 @@ struct DocumentSessionView: View {
     let sessionID: UUID
     let onScan: () -> Void
 
-    @State private var pages: [UIImage] = []
+    @State private var pageDrafts: [ScannerPageDraft] = []
     @State private var shareURL: URL?
     @State private var showingShare = false
     @State private var showingExportConfirmation = false
     @State private var showingDeleteConfirmation = false
     @State private var showingRenameDocument = false
     @State private var showingPageEditor = false
+    @State private var editingPageID: UUID?
     @State private var renameDocumentText = ""
     @State private var errorMessage: String?
 
     private var session: DocumentSession? { library.session(id: sessionID) }
+    private var pages: [UIImage] { pageDrafts.map(\.renderedImage) }
 
     var body: some View {
         Group {
@@ -29,11 +31,15 @@ struct DocumentSessionView: View {
                     )
                 } else {
                     ScanPreviewView(
+                        documentName: session.name,
                         pages: pages,
-                        onExport: exportPDF,
-                        onRescan: onScan,
-                        onEdit: { showingPageEditor = true },
-                        rescanTitle: "Add Pages"
+                        onTapPage: { index in
+                            guard pageDrafts.indices.contains(index) else { return }
+                            editingPageID = pageDrafts[index].id
+                            showingPageEditor = true
+                        },
+                        onAddPages: onScan,
+                        onExport: exportPDF
                     )
                 }
             } else {
@@ -57,19 +63,25 @@ struct DocumentSessionView: View {
             }
         }
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button {
-                    beginRenaming()
-                } label: {
-                    Image(systemName: "pencil")
-                }
-                .accessibilityLabel("Rename document")
-                .disabled(session == nil)
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button {
+                        beginRenaming()
+                    } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
 
-                Button(role: .destructive) { showingDeleteConfirmation = true } label: {
-                    Image(systemName: "trash")
+                    Divider()
+
+                    Button(role: .destructive) {
+                        showingDeleteConfirmation = true
+                    } label: {
+                        Label("Delete Document", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
                 }
-                .accessibilityLabel("Delete document")
+                .accessibilityLabel("Document actions")
                 .disabled(session == nil)
             }
         }
@@ -81,13 +93,13 @@ struct DocumentSessionView: View {
         }
         .fullScreenCover(isPresented: $showingPageEditor) {
             ScannerPageEditorView(
-                pages: pages.map {
-                    ScannerPageDraft(image: $0, needsEnhancement: false)
-                },
+                pages: pageDrafts,
+                initialPageID: editingPageID,
                 onCancel: {
                     showingPageEditor = false
+                    editingPageID = nil
                 },
-                onSave: saveEditedPages
+                onDone: saveEditedPages
             )
         }
         .confirmationDialog(
@@ -124,7 +136,9 @@ struct DocumentSessionView: View {
 
     private func loadPages() {
         do {
-            pages = try library.images(for: sessionID)
+            pageDrafts = try library.pageAssets(for: sessionID).map {
+                ScannerPageDraft(assets: $0)
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -132,10 +146,39 @@ struct DocumentSessionView: View {
 
     private func saveEditedPages(_ drafts: [ScannerPageDraft]) {
         do {
-            let editedPages = drafts.map(\.image)
-            try library.replacePages(editedPages, in: sessionID)
-            pages = editedPages
+            let existingIDs = Set(session?.pageIDs ?? [])
+            let finalIDs = drafts.map(\.id)
+            let finalSet = Set(finalIDs)
+
+            for pageID in existingIDs.subtracting(finalSet) {
+                try library.deletePage(id: pageID, from: sessionID)
+            }
+
+            let newAssets = drafts
+                .filter { !existingIDs.contains($0.id) }
+                .map {
+                    DocumentPageAssets(
+                        page: $0.documentPage,
+                        sourceImage: $0.sourceImage,
+                        renderedImage: $0.renderedImage
+                    )
+                }
+            if !newAssets.isEmpty {
+                try library.appendPageRecords(newAssets, to: sessionID)
+            }
+
+            for draft in drafts where existingIDs.contains(draft.id) && draft.isDirty {
+                try library.updatePage(
+                    draft.documentPage,
+                    in: sessionID,
+                    renderedImage: draft.renderedImage
+                )
+            }
+
+            try library.reorderPages(finalIDs, in: sessionID)
             showingPageEditor = false
+            editingPageID = nil
+            loadPages()
         } catch {
             errorMessage = "Could not save page edits: \(error.localizedDescription)"
         }

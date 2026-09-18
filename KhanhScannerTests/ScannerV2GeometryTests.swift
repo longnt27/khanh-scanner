@@ -42,6 +42,66 @@ final class ScannerV2GeometryTests: XCTestCase {
         XCTAssertEqual(state.pages.map(\.id), [firstID, thirdID])
     }
 
+    func testPageEditorCropRetainsOriginalSourceAndUpdatesMetadata() {
+        let pageID = UUID()
+        let source = solidImage(size: CGSize(width: 240, height: 360))
+        let draft = ScannerPageDraft(
+            id: pageID,
+            sourceImage: source,
+            cropQuadrilateral: .fullBounds,
+            rotation: .none,
+            renderedImage: source,
+            needsEnhancement: false,
+            isLegacySource: false,
+            isPersisted: true,
+            isDirty: false
+        )
+        var state = ScannerPageEditorState(pages: [draft])
+        let crop = ScannerV2Quadrilateral(
+            topLeft: CGPoint(x: 0.1, y: 0.9),
+            topRight: CGPoint(x: 0.9, y: 0.9),
+            bottomRight: CGPoint(x: 0.9, y: 0.1),
+            bottomLeft: CGPoint(x: 0.1, y: 0.1)
+        )
+
+        XCTAssertTrue(state.cropPage(id: pageID, quadrilateral: crop))
+
+        let edited = state.pages[0]
+        XCTAssertEqual(edited.sourceImage.size, source.size)
+        XCTAssertEqual(edited.cropQuadrilateral, crop)
+        XCTAssertTrue(edited.isDirty)
+        XCTAssertLessThan(edited.renderedImage.size.width, source.size.width)
+        XCTAssertLessThan(edited.renderedImage.size.height, source.size.height)
+    }
+
+    func testPersistedAssetsBecomeCleanEditorDraft() {
+        let id = UUID()
+        let source = solidImage(size: CGSize(width: 200, height: 300))
+        let rendered = solidImage(size: CGSize(width: 160, height: 240))
+        let page = DocumentPage(
+            id: id,
+            cropQuadrilateral: .fullBounds,
+            rotation: .clockwise180,
+            isLegacySource: false
+        )
+
+        let draft = ScannerPageDraft(
+            assets: DocumentPageAssets(
+                page: page,
+                sourceImage: source,
+                renderedImage: rendered
+            )
+        )
+
+        XCTAssertEqual(draft.id, id)
+        XCTAssertEqual(draft.rotation, .clockwise180)
+        XCTAssertEqual(draft.sourceImage.size, source.size)
+        XCTAssertEqual(draft.renderedImage.size, rendered.size)
+        XCTAssertTrue(draft.isPersisted)
+        XCTAssertFalse(draft.isDirty)
+        XCTAssertFalse(draft.needsEnhancement)
+    }
+
     func testManualPerspectiveCropUsesSelectedQuadrilateral() throws {
         let image = solidImage(size: CGSize(width: 200, height: 300))
         let quadrilateral = ScannerV2Quadrilateral(
@@ -62,6 +122,59 @@ final class ScannerV2GeometryTests: XCTestCase {
         XCTAssertLessThan(cropped.size.height, image.size.height)
         XCTAssertGreaterThan(cropped.size.width, image.size.width * 0.70)
         XCTAssertGreaterThan(cropped.size.height, image.size.height * 0.70)
+    }
+
+    func testCropValidationRejectsSelfIntersectingQuadrilateral() {
+        let bowTie = ScannerV2Quadrilateral(
+            topLeft: CGPoint(x: 0.1, y: 0.9),
+            topRight: CGPoint(x: 0.9, y: 0.1),
+            bottomRight: CGPoint(x: 0.9, y: 0.9),
+            bottomLeft: CGPoint(x: 0.1, y: 0.1)
+        )
+
+        XCTAssertFalse(bowTie.isValidCrop)
+        XCTAssertTrue(ScannerV2Quadrilateral.fullBounds.isValidCrop)
+    }
+
+    func testDocumentPageRendererAppliesCropThenRotation() throws {
+        let source = solidImage(size: CGSize(width: 200, height: 300))
+        let page = DocumentPage(
+            cropQuadrilateral: ScannerV2Quadrilateral(
+                topLeft: CGPoint(x: 0.15, y: 0.90),
+                topRight: CGPoint(x: 0.85, y: 0.90),
+                bottomRight: CGPoint(x: 0.85, y: 0.10),
+                bottomLeft: CGPoint(x: 0.15, y: 0.10)
+            ),
+            rotation: .clockwise90,
+            isLegacySource: false
+        )
+
+        let rendered = try DocumentPageRenderer.render(
+            source: source,
+            page: page,
+            enhance: false
+        )
+
+        XCTAssertGreaterThan(rendered.size.width, rendered.size.height)
+        XCTAssertLessThan(rendered.size.height, source.size.width)
+    }
+
+    func testFullBoundsLegacyRenderPreservesImageDimensions() throws {
+        let source = solidImage(size: CGSize(width: 120, height: 180))
+        let page = DocumentPage(
+            cropQuadrilateral: .fullBounds,
+            rotation: .none,
+            isLegacySource: true
+        )
+
+        let rendered = try DocumentPageRenderer.render(
+            source: source,
+            page: page,
+            enhance: false
+        )
+
+        XCTAssertEqual(rendered.size.width, source.size.width, accuracy: 1)
+        XCTAssertEqual(rendered.size.height, source.size.height, accuracy: 1)
     }
 
     func testRayPlaneIntersectionFindsExpectedPoint() throws {
