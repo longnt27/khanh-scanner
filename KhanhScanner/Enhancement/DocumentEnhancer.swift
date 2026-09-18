@@ -30,18 +30,37 @@ final class DocumentEnhancer {
     private func applyPaperWhiteBalance(to image: CIImage, source: CGImage) -> CIImage {
         guard let reference = paperReferenceColor(from: source) else { return image }
 
-        let luma = 0.2126 * reference.r + 0.7152 * reference.g + 0.0722 * reference.b
-        guard luma > 0.25,
-              let filter = CIFilter(name: "CIWhitePointAdjust") else {
+        let linearReference = (
+            r: linearSRGB(reference.r),
+            g: linearSRGB(reference.g),
+            b: linearSRGB(reference.b)
+        )
+        let target = max(linearReference.r, linearReference.g, linearReference.b)
+        guard target > 0.08 else { return image }
+
+        let rGain = clamp(target / max(linearReference.r, 0.001), min: 0.75, max: 1.55)
+        let gGain = clamp(target / max(linearReference.g, 0.001), min: 0.75, max: 1.55)
+        let bGain = clamp(target / max(linearReference.b, 0.001), min: 0.75, max: 1.55)
+
+        guard let toLinear = CIFilter(name: "CISRGBToneCurveToLinear"),
+              let matrix = CIFilter(name: "CIColorMatrix"),
+              let toSRGB = CIFilter(name: "CILinearToSRGBToneCurve") else {
             return image
         }
 
-        filter.setValue(image, forKey: kCIInputImageKey)
-        filter.setValue(
-            CIColor(red: reference.r, green: reference.g, blue: reference.b),
-            forKey: "inputColor"
-        )
-        return filter.outputImage ?? image
+        toLinear.setValue(image, forKey: kCIInputImageKey)
+        guard let linearImage = toLinear.outputImage else { return image }
+
+        matrix.setValue(linearImage, forKey: kCIInputImageKey)
+        matrix.setValue(CIVector(x: rGain, y: 0, z: 0, w: 0), forKey: "inputRVector")
+        matrix.setValue(CIVector(x: 0, y: gGain, z: 0, w: 0), forKey: "inputGVector")
+        matrix.setValue(CIVector(x: 0, y: 0, z: bGain, w: 0), forKey: "inputBVector")
+        matrix.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputAVector")
+        matrix.setValue(CIVector(x: 0, y: 0, z: 0, w: 0), forKey: "inputBiasVector")
+
+        guard let balancedLinear = matrix.outputImage else { return image }
+        toSRGB.setValue(balancedLinear, forKey: kCIInputImageKey)
+        return toSRGB.outputImage ?? image
     }
 
     private func paperReferenceColor(from image: CGImage) -> (r: CGFloat, g: CGFloat, b: CGFloat)? {
@@ -56,6 +75,7 @@ final class DocumentEnhancer {
                 bytesPerRow: side * 4,
                 space: CGColorSpaceCreateDeviceRGB(),
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                    | CGBitmapInfo.byteOrder32Big.rawValue
             ) else {
                 return false
             }
@@ -86,6 +106,17 @@ final class DocumentEnhancer {
             g: brightest.reduce(0) { $0 + $1.g } * scale,
             b: brightest.reduce(0) { $0 + $1.b } * scale
         )
+    }
+
+    private func linearSRGB(_ value: CGFloat) -> CGFloat {
+        if value <= 0.04045 {
+            return value / 12.92
+        }
+        return pow((value + 0.055) / 1.055, 2.4)
+    }
+
+    private func clamp(_ value: CGFloat, min lower: CGFloat, max upper: CGFloat) -> CGFloat {
+        Swift.min(upper, Swift.max(lower, value))
     }
 
 }
