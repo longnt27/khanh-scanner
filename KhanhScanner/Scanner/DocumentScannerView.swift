@@ -1,5 +1,4 @@
 import SwiftUI
-import VisionKit
 
 enum ScanDismissalPolicy {
     static func protect(_ controller: UIViewController) {
@@ -14,30 +13,29 @@ struct DocumentScannerView: UIViewControllerRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
-    func makeUIViewController(context: Context) -> VNDocumentCameraViewController {
-        let controller = VNDocumentCameraViewController()
+    func makeUIViewController(context: Context) -> DocumentCameraViewController {
+        let controller = DocumentCameraViewController()
         controller.delegate = context.coordinator
         ScanDismissalPolicy.protect(controller)
         return controller
     }
 
-    func updateUIViewController(_ uiViewController: VNDocumentCameraViewController, context: Context) {}
+    func updateUIViewController(_ uiViewController: DocumentCameraViewController, context: Context) {}
 
-    final class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
+    final class Coordinator: NSObject, DocumentCameraViewControllerDelegate {
         let parent: DocumentScannerView
         init(parent: DocumentScannerView) { self.parent = parent }
 
-        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
-            let pages = (0..<scan.pageCount).map { scan.imageOfPage(at: $0) }
-            controller.dismiss(animated: true) { self.parent.onScan(pages) }
+        func documentCameraViewController(_ controller: DocumentCameraViewController, didFinishWith pages: [UIImage]) {
+            parent.onScan(pages)
         }
 
-        func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) {
-            controller.dismiss(animated: true) { self.parent.onCancel() }
+        func documentCameraViewControllerDidCancel(_ controller: DocumentCameraViewController) {
+            parent.onCancel()
         }
 
-        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFailWithError error: Error) {
-            controller.dismiss(animated: true) { self.parent.onFailure(error) }
+        func documentCameraViewController(_ controller: DocumentCameraViewController, didFailWith error: Error) {
+            parent.onFailure(error)
         }
     }
 }

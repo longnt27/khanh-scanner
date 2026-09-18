@@ -1,5 +1,4 @@
 import SwiftUI
-import VisionKit
 
 struct ContentView: View {
     @StateObject private var library = DocumentLibrary()
@@ -14,7 +13,7 @@ struct ContentView: View {
             LibraryBrowserView(
                 library: library,
                 currentFolderID: nil,
-                canScan: !isProcessing && VNDocumentCameraViewController.isSupported,
+                canScan: !isProcessing && DocumentCameraViewController.isSupported,
                 onNewDocument: newDocument
             )
             .navigationDestination(for: LibraryRoute.self) { route in
@@ -27,7 +26,7 @@ struct ContentView: View {
                     LibraryBrowserView(
                         library: library,
                         currentFolderID: folderID,
-                        canScan: !isProcessing && VNDocumentCameraViewController.isSupported,
+                        canScan: !isProcessing && DocumentCameraViewController.isSupported,
                         onNewDocument: newDocument
                     )
                 }
