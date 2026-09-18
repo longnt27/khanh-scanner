@@ -199,8 +199,8 @@ final class ScannerV2GeometryTests: XCTestCase {
             UIColor.white.setFill()
             context.fill(CGRect(x: 0, y: 0, width: 128, height: 128))
             UIColor.black.setFill()
-            for row in 0..<8 {
-                context.fill(CGRect(x: 18, y: 20 + row * 12, width: 92, height: 2))
+            for row in 0..<4 {
+                context.fill(CGRect(x: 18, y: 28 + row * 20, width: 92, height: 2))
             }
         }
 
