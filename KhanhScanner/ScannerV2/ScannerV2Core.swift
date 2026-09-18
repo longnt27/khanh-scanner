@@ -242,22 +242,45 @@ struct ScannerV2CameraMotionTracker {
 
 struct ScannerV2PageChangeDetector {
     let minimumChange: CGFloat
+    let minimumContentChange: Float
+
     private var capturedQuadrilateral: ScannerV2Quadrilateral?
+    private var capturedFingerprint: ScannerV2PageFingerprint?
 
-    init(minimumChange: CGFloat = 0.05) {
+    init(
+        minimumChange: CGFloat = 0.05,
+        minimumContentChange: Float = 0.12
+    ) {
         self.minimumChange = minimumChange
+        self.minimumContentChange = minimumContentChange
     }
 
-    mutating func markCaptured(_ quadrilateral: ScannerV2Quadrilateral) {
+    mutating func markCaptured(
+        _ quadrilateral: ScannerV2Quadrilateral,
+        fingerprint: ScannerV2PageFingerprint? = nil
+    ) {
         capturedQuadrilateral = quadrilateral
+        capturedFingerprint = fingerprint
     }
 
-    func canCapture(_ quadrilateral: ScannerV2Quadrilateral) -> Bool {
+    func canCapture(
+        _ quadrilateral: ScannerV2Quadrilateral,
+        fingerprint: ScannerV2PageFingerprint? = nil
+    ) -> Bool {
         guard let capturedQuadrilateral else { return true }
-        return capturedQuadrilateral.maximumCornerDistance(to: quadrilateral) >= minimumChange
+
+        if capturedQuadrilateral.maximumCornerDistance(to: quadrilateral) >= minimumChange {
+            return true
+        }
+
+        guard let capturedFingerprint, let fingerprint else {
+            return false
+        }
+        return capturedFingerprint.distance(to: fingerprint) >= minimumContentChange
     }
 
     mutating func reset() {
         capturedQuadrilateral = nil
+        capturedFingerprint = nil
     }
 }
