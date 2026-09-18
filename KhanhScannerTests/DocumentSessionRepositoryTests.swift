@@ -159,6 +159,37 @@ final class DocumentSessionRepositoryTests: XCTestCase {
         XCTAssertEqual(try repository.images(for: reloaded).count, 1)
     }
 
+    func testBulkDeleteRemovesSelectedItemsAndFolderDescendants() throws {
+        let repository = DocumentSessionRepository(rootURL: rootURL)
+        let loose = try repository.createSession()
+        let looseWithPage = try repository.appendPages([image(color: .red)], to: loose.id)
+
+        let parent = try repository.createFolder(name: "Parent")
+        let child = try repository.createFolder(name: "Child", parentFolderID: parent.id)
+        let nested = try repository.createSession(folderID: child.id)
+        let nestedWithPage = try repository.appendPages([image(color: .blue)], to: nested.id)
+
+        let keepFolder = try repository.createFolder(name: "Keep")
+        let keep = try repository.createSession(folderID: keepFolder.id)
+        _ = try repository.appendPages([image(color: .green)], to: keep.id)
+
+        try repository.deleteItems(
+            sessionIDs: [loose.id],
+            folderIDs: [parent.id]
+        )
+
+        XCTAssertNil(try repository.session(id: loose.id))
+        XCTAssertNil(try repository.session(id: nested.id))
+        XCTAssertFalse(try repository.folders().contains(where: { $0.id == parent.id }))
+        XCTAssertFalse(try repository.folders().contains(where: { $0.id == child.id }))
+        XCTAssertNotNil(try repository.session(id: keep.id))
+        XCTAssertTrue(try repository.folders().contains(where: { $0.id == keepFolder.id }))
+
+        XCTAssertThrowsError(try repository.images(for: looseWithPage))
+        XCTAssertThrowsError(try repository.images(for: nestedWithPage))
+        XCTAssertEqual(try repository.images(for: try XCTUnwrap(repository.session(id: keep.id))).count, 1)
+    }
+
     private func image(color: UIColor, size: CGSize = CGSize(width: 4, height: 4)) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
